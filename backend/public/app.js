@@ -83,6 +83,7 @@ async function renderDashboard() {
           <div style="display:flex; align-items:center; gap:12px;">
             <span class="pill ${p.status==='publicada'?'teal':''}">${p.status}</span>
             ${p.status==='publicada' ? `<button class="btn subtle" data-ver-resultado="${p.id}">Ver resultados</button>` : ""}
+            <button class="btn danger" style="padding:5px 10px; font-size:11px;" data-apagar-prova="${p.id}">Apagar</button>
           </div>
         </div>
       `).join("")}
@@ -96,6 +97,18 @@ async function renderDashboard() {
 
   document.getElementById("btn-nova-prova").addEventListener("click", () => setView("montar"));
   document.getElementById("btn-ir-alunos")?.addEventListener("click", () => setView("alunos"));
+  content.querySelectorAll("[data-apagar-prova]").forEach((el) => {
+    el.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      if (!confirm("Apagar esta Prova-Mestre? Isso também apaga todas as provas individuais e respostas geradas a partir dela. Não tem como desfazer.")) return;
+      try {
+        await api(`/provas-mestre/${el.dataset.apagarProva}`, { method: "DELETE" });
+        renderDashboard();
+      } catch (e) {
+        alert("Erro ao apagar: " + e.message);
+      }
+    });
+  });
   content.querySelectorAll("[data-ver-resultado]").forEach((el) => {
     el.addEventListener("click", () => {
       state.provaAtualId = el.dataset.verResultado;
