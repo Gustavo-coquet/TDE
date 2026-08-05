@@ -3,10 +3,11 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import { prisma } from "./db";
-import { TEMPLATES } from "./questoes/templates";
+import { QUESTOES_PADRAO } from "./questoes/padrao";
 import { questoesRouter } from "./routes/questoes";
 import { provasRouter } from "./routes/provas";
 import { alunoExamRouter } from "./routes/alunoExam";
+import { alunosRouter } from "./routes/alunos";
 
 const app = express();
 app.use(cors());
@@ -15,6 +16,7 @@ app.use(express.json());
 app.use("/api/questoes", questoesRouter);
 app.use("/api/provas-mestre", provasRouter);
 app.use("/api/prova", alunoExamRouter);
+app.use("/api/alunos", alunosRouter);
 
 // serve o frontend (arquivos estáticos, sem build step)
 app.use(express.static(path.join(__dirname, "..", "public")));
@@ -27,29 +29,25 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(500).json({ erro: err?.message || "Erro interno no servidor." });
 });
 
-// Popula o banco na primeira vez que o servidor liga (só se estiver vazio).
-// Isso evita depender de rodar "npm run seed" manualmente por um terminal —
+// Popula o banco de QUESTÕES na primeira vez que o servidor liga (só se estiver
+// vazio). Não populamos mais alunos automaticamente — a turma real é cadastrada
+// pelo professor na tela "Alunos". Isso evita depender de um terminal manual,
 // necessário porque o Shell do Render só existe em planos pagos.
 async function garantirDadosIniciais() {
   const totalQuestoes = await prisma.questao.count();
   if (totalQuestoes === 0) {
     console.log("Banco de questões vazio — cadastrando questões padrão...");
-    for (const t of Object.values(TEMPLATES)) {
+    for (const q of QUESTOES_PADRAO) {
       await prisma.questao.create({
-        data: { tema: t.tema, dificuldade: t.dificuldade, tipo: t.tipo, unidade: t.unidade },
+        data: {
+          tema: q.tema,
+          dificuldade: q.dificuldade,
+          unidade: q.unidade,
+          enunciado: q.enunciado,
+          variaveis: q.variaveis,
+          formula: q.formula,
+        },
       });
-    }
-  }
-
-  const totalAlunos = await prisma.aluno.count();
-  if (totalAlunos === 0) {
-    console.log("Nenhum aluno cadastrado — cadastrando turma de exemplo...");
-    const nomes = [
-      "Ana Beatriz Souza", "Bruno Carvalho", "Camila Ferreira", "Diego Martins",
-      "Elisa Nogueira", "Felipe Ramos", "Gabriela Lopes", "Henrique Alves",
-    ];
-    for (const nome of nomes) {
-      await prisma.aluno.create({ data: { nome } });
     }
   }
 }
@@ -58,10 +56,7 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3333;
 
 garantirDadosIniciais()
   .catch((e) => {
-    // Não derruba o servidor por causa disso — só loga. Se o banco ainda não
-    // tiver as tabelas (migration pendente), as rotas vão responder com um
-    // erro claro (graças ao middleware acima) em vez do servidor cair.
-    console.error("Falha ao garantir dados iniciais (a migration já rodou?):", e);
+    console.error("Falha ao garantir dados iniciais (o schema já foi aplicado no banco?):", e);
   })
   .finally(() => {
     app.listen(PORT, () => {
