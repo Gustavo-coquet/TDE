@@ -83,11 +83,11 @@ provasRouter.post("/:id/publicar", async (req, res) => {
         qrToken,
         questoes: {
           create: questoes.map((q) => ({
-            questaoId: q.questaoId,
+            questao: { connect: { id: q.questaoId } },
             ordem: q.ordem,
-            parametrosGerados: q.parametrosGerados,
+            parametrosGerados: q.parametrosGerados as any,
             enunciadoFinal: q.enunciadoFinal,
-            alternativasFinal: q.alternativasFinal,
+            alternativasFinal: q.alternativasFinal as any,
             respostaCorretaLetra: q.respostaCorretaLetra,
           })),
         },
