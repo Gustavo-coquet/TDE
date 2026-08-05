@@ -174,3 +174,18 @@ provasRouter.get("/:id/resultados", asyncHandler(async (req, res) => {
     rankingErros,
   });
 }));
+
+// DELETE /api/provas-mestre/:id -> apaga a Prova-Mestre e tudo que depende dela
+// (provas individuais geradas, respostas dos alunos)
+provasRouter.delete("/:id", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  await prisma.$transaction([
+    prisma.provaIndividualQuestao.deleteMany({ where: { provaIndividual: { provaMestreId: id } } }),
+    prisma.provaIndividual.deleteMany({ where: { provaMestreId: id } }),
+    prisma.provaMestreQuestao.deleteMany({ where: { provaMestreId: id } }),
+    prisma.provaMestre.delete({ where: { id } }),
+  ]);
+
+  res.json({ ok: true });
+}));
