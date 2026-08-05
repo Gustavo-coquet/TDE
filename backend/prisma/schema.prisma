@@ -18,8 +18,10 @@ model Questao {
   id           String   @id @default(uuid())
   tema         String
   dificuldade  Int
-  tipo         String   // chave que aponta para o template de parametrização em código (src/questoes/templates.ts)
   unidade      String
+  enunciado    String                        // template com placeholders {NOME}
+  variaveis    Json                           // [{ nome, min, max, decimais }]
+  formula      String                         // expressão aritmética usando os nomes das variáveis
   criadoEm     DateTime @default(now())
 
   provaMestreQuestoes    ProvaMestreQuestao[]
