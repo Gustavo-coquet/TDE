@@ -19,7 +19,7 @@ async function iniciar() {
     return;
   }
   try {
-    const prova = await api(`/${token}`);
+    const prova = await api(`/prova/${token}`);
     state.prova = prova;
     state.respostas = {};
     prova.questoes.forEach((q) => { if (q.respostaAlunoLetra) state.respostas[q.id] = q.respostaAlunoLetra; });
@@ -111,7 +111,7 @@ function renderProva() {
       state.respostas[q.id] = letra;
       renderProva();
       try {
-        await api(`/${token}/responder`, {
+        await api(`/prova/${token}/responder`, {
           method: "POST",
           body: JSON.stringify({ provaIndividualQuestaoId: q.id, letra }),
         });
@@ -136,7 +136,7 @@ function renderProva() {
 async function finalizar() {
   if (state.timer) clearInterval(state.timer);
   try {
-    const resultado = await api(`/${token}/finalizar`, { method: "POST" });
+    const resultado = await api(`/prova/${token}/finalizar`, { method: "POST" });
     renderResultado(resultado);
   } catch (e) {
     content.innerHTML = `<div class="error-box">Erro ao finalizar: ${e.message}</div>`;
