@@ -208,6 +208,7 @@ alunoExamRouter.post("/:provaMestreId/:token/finalizar", asyncHandler(async (req
     percentual: total ? Math.round((acertos / total) * 100) : 0,
     valor: provaMestre.valor,
     notaPontos,
+    prazoFinal: provaMestre.prazoFinal,
     podeTentarDeNovo,
     detalhe: ativa.questoes.map((q) => ({
       tema: q.questao.tema,
