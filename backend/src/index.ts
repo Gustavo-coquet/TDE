@@ -9,20 +9,16 @@ import { provasRouter } from "./routes/provas";
 import { alunoExamRouter } from "./routes/alunoExam";
 import { alunosRouter } from "./routes/alunos";
 import { turmasRouter } from "./routes/turmas";
-
 const app = express();
 app.use(cors());
 app.use(express.json());
-
 app.use("/api/questoes", questoesRouter);
 app.use("/api/provas-mestre", provasRouter);
 app.use("/api/prova", alunoExamRouter);
 app.use("/api/alunos", alunosRouter);
 app.use("/api/turmas", turmasRouter);
-
 // serve o frontend (arquivos estáticos, sem build step)
 app.use(express.static(path.join(__dirname, "..", "public")));
-
 // middleware de erro global: qualquer erro (ex.: Prisma reclamando que uma
 // tabela não existe porque a migration não rodou) cai aqui e vira uma
 // resposta JSON clara, em vez da requisição travar até o Render devolver 502.
@@ -30,7 +26,6 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   console.error("Erro não tratado:", err);
   res.status(500).json({ erro: err?.message || "Erro interno no servidor." });
 });
-
 // Popula o banco de QUESTÕES na primeira vez que o servidor liga (só se estiver
 // vazio). Não populamos mais alunos automaticamente — a turma real é cadastrada
 // pelo professor na tela "Alunos". Isso evita depender de um terminal manual,
@@ -45,16 +40,14 @@ async function garantirDadosIniciais() {
           tema: q.tema,
           dificuldade: q.dificuldade,
           enunciado: q.enunciado,
-          variaveis: q.variaveis,
-          etapas: q.etapas,
+          variaveis: q.variaveis as any,
+          etapas: q.etapas as any,
         },
       });
     }
   }
 }
-
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3333;
-
 garantirDadosIniciais()
   .catch((e) => {
     // Não derruba o servidor por causa disso — só loga. Se o banco ainda não
