@@ -84,6 +84,39 @@ questoesRouter.post("/", asyncHandler(async (req, res) => {
   res.status(201).json(questao);
 }));
 
+// PUT /api/questoes/:id -> edita uma questão existente
+// body: { tema, dificuldade, enunciado, variaveis, etapas }
+questoesRouter.put("/:id", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { tema, dificuldade, enunciado, variaveis, etapas } = req.body;
+
+  if (!tema || !enunciado || !Array.isArray(variaveis) || variaveis.length === 0 || !Array.isArray(etapas) || etapas.length === 0) {
+    return res.status(400).json({ erro: "tema, enunciado, ao menos uma variável e ao menos uma etapa são obrigatórios." });
+  }
+  if (!etapas.some((e: EtapaDb) => e.saida)) {
+    return res.status(400).json({ erro: "Marque ao menos uma etapa como \"saída\" (resposta mostrada ao aluno)." });
+  }
+
+  try {
+    preview(enunciado, variaveis, etapas, Date.now() % 100000 + 1);
+  } catch (e: any) {
+    return res.status(400).json({ erro: `Fórmulas ou variáveis inválidas: ${e.message}` });
+  }
+
+  const questao = await prisma.questao.update({
+    where: { id },
+    data: {
+      tema,
+      dificuldade: Number(dificuldade) || 1,
+      enunciado,
+      variaveis,
+      etapas,
+    },
+  });
+
+  res.json(questao);
+}));
+
 // DELETE /api/questoes/:id
 questoesRouter.delete("/:id", asyncHandler(async (req, res) => {
   const { id } = req.params;
