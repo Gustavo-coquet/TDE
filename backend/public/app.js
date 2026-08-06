@@ -386,7 +386,7 @@ async function renderBanco(mostrarForm) {
           ${corners()}
           <span class="pill amber">Preview parametrizado</span>
           <div style="font-weight:600; font-size:15px; margin-top:12px;">${q.tema}</div>
-          ${q.imagem ? `<img src="${q.imagem}" style="max-width:100%; margin-top:10px; border:1px solid var(--line-faint);" />` : ""}
+          ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-top:10px; border:1px solid var(--line-faint);" />` : ""}
           <div style="font-size:13.5px; margin-top:10px; line-height:1.6;">${q.preview.enunciado}</div>
           ${q.preview.erro
             ? `<div class="mono" style="color:var(--red); font-size:12px; margin-top:10px;">Erro: ${q.preview.erro}</div>`
@@ -647,7 +647,7 @@ function renderFormNovaQuestao(container) {
     try {
       const resultado = await api("/questoes/testar", { method: "POST", body: JSON.stringify(q) });
       previewEl.innerHTML = `<div class="ok-box">
-        ${q.imagem ? `<img src="${q.imagem}" style="max-width:100%; margin-bottom:10px; border:1px solid var(--line-faint);" />` : ""}
+        ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-bottom:10px; border:1px solid var(--line-faint);" />` : ""}
         <div style="margin-bottom:10px;">${resultado.enunciado}</div>
         ${renderAlternativasPreview(resultado.alternativas)}
       </div>`;
