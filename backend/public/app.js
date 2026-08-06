@@ -210,10 +210,12 @@ Bruno Carvalho"></textarea>
             <div class="row" style="margin-top:6px;">
               <span class="muted" style="font-size:11.5px;">${p.totalQuestoes} questões · ${p.totalAlunos} alunos</span>
               <div style="display:flex; gap:6px;">
+                ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-links-tde="${p.id}">Ver links</button>` : ""}
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-resultado-tde="${p.id}">Resultados</button>` : ""}
                 <button class="btn danger" style="font-size:11px; padding:4px 8px;" data-apagar-tde="${p.id}">Apagar</button>
               </div>
             </div>
+            <div id="links-tde-${p.id}"></div>
           </div>
         `).join("")}
       </div>
@@ -266,6 +268,29 @@ Bruno Carvalho"></textarea>
 
   content.querySelectorAll("[data-ver-resultado-tde]").forEach((el) => {
     el.addEventListener("click", () => setView("resultados", { provaAtualId: el.dataset.verResultadoTde }));
+  });
+
+  content.querySelectorAll("[data-ver-links-tde]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const alvo = document.getElementById(`links-tde-${el.dataset.verLinksTde}`);
+      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+      alvo.innerHTML = `<div class="muted mono" style="font-size:11px; padding:8px 0;">Carregando…</div>`;
+      try {
+        const links = await api(`/provas-mestre/${el.dataset.verLinksTde}/links`);
+        alvo.innerHTML = `
+          <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint);">
+            ${links.map((l) => `
+              <div class="row" style="padding:5px 0;">
+                <span style="font-size:12px;">${l.alunoNome}</span>
+                <a href="/aluno.html?token=${l.qrToken}" target="_blank" class="btn subtle" style="padding:4px 8px; font-size:11px;">Abrir prova →</a>
+              </div>
+            `).join("")}
+          </div>
+        `;
+      } catch (e) {
+        alvo.innerHTML = `<div class="error-box" style="margin-top:8px;">Erro ao carregar links: ${e.message}</div>`;
+      }
+    });
   });
 
   content.querySelectorAll("[data-apagar-tde]").forEach((el) => {
