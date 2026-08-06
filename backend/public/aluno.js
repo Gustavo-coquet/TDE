@@ -243,9 +243,12 @@ function renderResultado(r) {
       ${r.podeTentarDeNovo ? `
         <div class="card" style="width:100%; text-align:center; margin-top:8px;">
           <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
-          <p style="font-size:13.5px; margin-bottom:12px;">Quer tentar melhorar sua nota? Vale a <b>maior</b> das duas tentativas.</p>
-          <button class="btn" id="btn-tentar-de-novo">Fazer segunda tentativa</button>
-          <button class="btn ghost" id="btn-encerrar" style="margin-left:8px;">Ficar com esta nota</button>
+          <p style="font-size:13.5px; margin-bottom:6px;">Quer tentar melhorar sua nota agora? Vale a <b>maior</b> das duas tentativas.</p>
+          <p class="muted" style="font-size:12px; margin-bottom:12px;">
+            Sem pressa — você pode fechar esta página e voltar outro dia (usando o mesmo link) pra fazer a segunda tentativa quando quiser, dentro do prazo${r.prazoFinal ? ` (até ${new Date(r.prazoFinal).toLocaleDateString("pt-BR")})` : ""}.
+          </p>
+          <button class="btn" id="btn-tentar-de-novo">Fazer segunda tentativa agora</button>
+          <button class="btn ghost" id="btn-encerrar" style="margin-left:8px;">Voltar depois</button>
         </div>
       ` : ""}
     </div>
