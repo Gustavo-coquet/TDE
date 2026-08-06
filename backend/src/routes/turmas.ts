@@ -32,6 +32,17 @@ turmasRouter.post("/", asyncHandler(async (req, res) => {
   res.status(201).json(turma);
 }));
 
+// PUT /api/turmas/:id  { nome } -> renomeia a turma
+turmasRouter.put("/:id", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { nome } = req.body;
+  if (!nome || !String(nome).trim()) {
+    return res.status(400).json({ erro: "Informe o nome da turma." });
+  }
+  const turma = await prisma.turma.update({ where: { id }, data: { nome: String(nome).trim() } });
+  res.json(turma);
+}));
+
 // DELETE /api/turmas/:id -> apaga a turma e tudo que depende dela (alunos, TDEs, provas individuais, respostas)
 turmasRouter.delete("/:id", asyncHandler(async (req, res) => {
   const { id } = req.params;
