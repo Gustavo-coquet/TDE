@@ -9,6 +9,8 @@ const state = {
   publicarResultado: null,
   novaQuestaoVars: [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }],
   novaQuestaoEtapas: [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true }],
+  editandoQuestaoId: null,
+  editandoQuestaoDados: null,
 };
 
 const content = document.getElementById("content");
@@ -313,7 +315,13 @@ async function renderBanco(mostrarForm) {
     </div>
   `;
 
-  document.getElementById("btn-nova-questao").addEventListener("click", () => renderBanco(!mostrarForm));
+  document.getElementById("btn-nova-questao").addEventListener("click", () => {
+    state.editandoQuestaoId = null;
+    state.editandoQuestaoDados = null;
+    state.novaQuestaoVars = [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }];
+    state.novaQuestaoEtapas = [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true }];
+    renderBanco(!mostrarForm);
+  });
   if (mostrarForm) renderFormNovaQuestao(document.getElementById("form-questao"));
 
   content.querySelectorAll("[data-questao]").forEach((el) => {
@@ -329,9 +337,19 @@ async function renderBanco(mostrarForm) {
             ? `<div class="mono" style="color:var(--red); font-size:12px; margin-top:10px;">Erro: ${q.preview.erro}</div>`
             : `<div style="margin-top:12px;">${renderAlternativasPreview(q.preview.alternativas)}</div>`}
           <div class="divider mono muted" style="font-size:11px;">Cada aluno recebe outros valores dentro das mesmas faixas — mesmo raciocínio, mesma dificuldade.</div>
-          <div style="margin-top:12px;"><button class="btn danger" data-remover="${q.id}">Remover questão</button></div>
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button class="btn subtle" data-editar="${q.id}">Editar questão</button>
+            <button class="btn danger" data-remover="${q.id}">Remover questão</button>
+          </div>
         </div>
       `;
+      document.querySelector("[data-editar]")?.addEventListener("click", () => {
+        state.editandoQuestaoId = q.id;
+        state.editandoQuestaoDados = { tema: q.tema, dificuldade: q.dificuldade, enunciado: q.enunciado };
+        state.novaQuestaoVars = JSON.parse(JSON.stringify(q.variaveis));
+        state.novaQuestaoEtapas = JSON.parse(JSON.stringify(q.etapas));
+        renderBanco(true);
+      });
       document.querySelector("[data-remover]")?.addEventListener("click", async () => {
         if (!confirm("Remover esta questão do banco?")) return;
         try {
@@ -361,16 +379,18 @@ function renderAlternativasPreview(alternativas) {
 }
 
 function renderFormNovaQuestao(container) {
+  const editando = !!state.editandoQuestaoId;
+  const dados = state.editandoQuestaoDados || { tema: "", dificuldade: 2, enunciado: "" };
   container.innerHTML = `
     <div class="card accent-teal">
       ${corners()}
-      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px;">Nova questão parametrizada</div>
+      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px;">${editando ? "Editar questão" : "Nova questão parametrizada"}</div>
       <div id="erro-questao"></div>
-      <div class="field"><label>Tema</label><input id="nq-tema" placeholder="Ex: Resistência dos Materiais — Flexão" /></div>
-      <div class="field"><label>Dificuldade (1 a 5)</label><input id="nq-dificuldade" type="number" min="1" max="5" value="2" class="mono" style="max-width:120px;" /></div>
+      <div class="field"><label>Tema</label><input id="nq-tema" value="${dados.tema}" placeholder="Ex: Resistência dos Materiais — Flexão" /></div>
+      <div class="field"><label>Dificuldade (1 a 5)</label><input id="nq-dificuldade" type="number" min="1" max="5" value="${dados.dificuldade}" class="mono" style="max-width:120px;" /></div>
       <div class="field">
         <label>Enunciado (use {NOME} para referenciar qualquer variável OU etapa)</label>
-        <textarea id="nq-enunciado" placeholder="Ex: Uma viga retangular tem base {b} cm e altura {h} cm..."></textarea>
+        <textarea id="nq-enunciado" placeholder="Ex: Uma viga retangular tem base {b} cm e altura {h} cm...">${dados.enunciado}</textarea>
       </div>
       <div class="field">
         <label>Letras gregas — clique num campo de texto abaixo e depois na letra pra inserir</label>
@@ -392,7 +412,7 @@ function renderFormNovaQuestao(container) {
 
       <div style="display:flex; gap:10px; margin-top:6px;">
         <button class="btn subtle" id="nq-testar" type="button">Testar</button>
-        <button class="btn" id="nq-salvar" type="button">Salvar questão</button>
+        <button class="btn" id="nq-salvar" type="button">${editando ? "Salvar alterações" : "Salvar questão"}</button>
       </div>
       <div id="nq-preview" style="margin-top:12px;"></div>
     </div>
@@ -536,7 +556,13 @@ function renderFormNovaQuestao(container) {
     const erroValidacao = validar(q);
     if (erroValidacao) { erroEl.innerHTML = `<div class="error-box">${erroValidacao}</div>`; return; }
     try {
-      await api("/questoes", { method: "POST", body: JSON.stringify(q) });
+      if (state.editandoQuestaoId) {
+        await api(`/questoes/${state.editandoQuestaoId}`, { method: "PUT", body: JSON.stringify(q) });
+      } else {
+        await api("/questoes", { method: "POST", body: JSON.stringify(q) });
+      }
+      state.editandoQuestaoId = null;
+      state.editandoQuestaoDados = null;
       state.novaQuestaoVars = [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }];
       state.novaQuestaoEtapas = [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true }];
       renderBanco(false);
