@@ -421,7 +421,7 @@ async function renderBanco(mostrarForm) {
 
 // monta o texto de uma alternativa combinando todos os campos (ex.: "I=29947.5 cm⁴, σ=0.145 kN/cm²")
 function textoAlternativa(campos) {
-  return campos.map((c) => `${c.nome} = ${c.valor} ${c.unidade}`).join("  ·  ");
+  return campos.map((c) => `${c.nome} = ${c.valor} ${c.unidade}`).join("   |   ");
 }
 
 function renderAlternativasPreview(alternativas) {
