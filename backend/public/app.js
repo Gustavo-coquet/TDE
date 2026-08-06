@@ -539,6 +539,7 @@ function renderFormNovaQuestao(container) {
       const ch = btn.dataset.letraGrega;
       el.value = el.value.slice(0, start) + ch + el.value.slice(end);
       el.selectionStart = el.selectionEnd = start + ch.length;
+      el.dispatchEvent(new Event("input", { bubbles: true })); // sem isso, o valor não era salvo (ficava só na tela)
       el.focus();
     });
   });
