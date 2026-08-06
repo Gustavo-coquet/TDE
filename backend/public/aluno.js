@@ -124,7 +124,7 @@ function renderProva() {
     <div class="card">
       <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
       <span class="pill">${q.tema}</span>
-      ${q.imagem ? `<img src="${q.imagem}" style="max-width:100%; margin-top:14px; border:1px solid var(--line-faint);" />` : ""}
+      ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 420px); max-height:320px; width:auto; height:auto; display:block; margin:14px auto 0; border:1px solid var(--line-faint); cursor:zoom-in;" onclick="window.open('${q.imagem}', '_blank')" title="Clique para ampliar" />` : ""}
       <div style="font-size:15.5px; line-height:1.7; margin-top:14px;">${q.enunciado}</div>
       <div style="margin-top:18px;">
         ${q.alternativas.map((a) => `
