@@ -164,7 +164,10 @@ async function renderTurmaDetalhe() {
   content.innerHTML = `
     <div style="margin-bottom:6px;"><a href="#" id="voltar-turmas" class="mono muted" style="font-size:12px;">← Todas as turmas</a></div>
     <div class="eyebrow">TURMA</div>
-    <h1 style="margin-bottom:20px;">${turma.nome}</h1>
+    <div class="row" style="margin-bottom:20px; align-items:center;">
+      <h1 id="turma-titulo">${turma.nome}</h1>
+      <button class="btn subtle" id="btn-editar-turma" style="font-size:11px; padding:5px 10px;">Editar nome</button>
+    </div>
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; margin-bottom:20px;">
       <div class="card">
@@ -215,6 +218,17 @@ Bruno Carvalho"></textarea>
   `;
 
   document.getElementById("voltar-turmas").addEventListener("click", (e) => { e.preventDefault(); setView("turmas"); });
+  document.getElementById("btn-editar-turma").addEventListener("click", async () => {
+    const novoNome = prompt("Novo nome da turma:", turma.nome);
+    if (novoNome === null) return; // cancelou
+    if (!novoNome.trim()) { alert("O nome não pode ficar vazio."); return; }
+    try {
+      await api(`/turmas/${turmaId}`, { method: "PUT", body: JSON.stringify({ nome: novoNome.trim() }) });
+      renderTurmaDetalhe();
+    } catch (e) {
+      alert("Erro ao renomear: " + e.message);
+    }
+  });
   document.getElementById("btn-novo-tde").addEventListener("click", () => {
     state.selecionadas = new Set();
     state.alunosSelecionados = new Set();
