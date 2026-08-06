@@ -179,6 +179,17 @@ provasRouter.get("/:id/resultados", asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /api/provas-mestre/:id/links -> rever os links individuais de um TDE já publicado
+provasRouter.get("/:id/links", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const provas = await prisma.provaIndividual.findMany({
+    where: { provaMestreId: id },
+    include: { aluno: true },
+    orderBy: { aluno: { nome: "asc" } },
+  });
+  res.json(provas.map((p) => ({ alunoNome: p.aluno.nome, qrToken: p.qrToken, status: p.status })));
+}));
+
 // DELETE /api/provas-mestre/:id -> apaga a Prova-Mestre e tudo que depende dela
 // (provas individuais geradas, respostas dos alunos)
 provasRouter.delete("/:id", asyncHandler(async (req, res) => {
