@@ -130,7 +130,7 @@ function renderProva() {
         ${q.alternativas.map((a) => `
           <div class="option ${state.respostas[q.id]===a.letra?'selected':''}" data-letra="${a.letra}">
             <div class="option-letter">${a.letra}</div>
-            <span class="mono" style="font-size:14px;">${a.campos.map(c => `${c.nome} = ${c.valor} ${c.unidade}`).join("  ·  ")}</span>
+            <span class="mono" style="font-size:14px;">${a.campos.map(c => `${c.nome} = ${c.valor} ${c.unidade}`).join("   |   ")}</span>
           </div>
         `).join("")}
       </div>
