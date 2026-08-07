@@ -344,10 +344,22 @@ async function renderTurmaDetalhe() {
     el.addEventListener("click", async () => {
       if (!confirm("Remover este aluno da turma?")) return;
       try {
-        await api(`/alunos/${el.dataset.removerAluno}`, { method: "DELETE" });
+        await api(`/alunos/${el.dataset.removerAluno}`, { method: "DELETE", body: JSON.stringify({}) });
         renderTurmaDetalhe();
       } catch (e) {
-        alert("Erro ao remover: " + e.message);
+        if (e.message && e.message.toLowerCase().includes("senha")) {
+          if (!confirm("⚠ Este aluno já respondeu algum TDE. Se você apagar, todo o histórico de respostas e notas dele nesse(s) TDE(s) será perdido pra sempre. Quer continuar mesmo assim?")) return;
+          const senha = prompt("Digite a senha do professor para confirmar:");
+          if (senha === null) return;
+          try {
+            await api(`/alunos/${el.dataset.removerAluno}`, { method: "DELETE", body: JSON.stringify({ senha }) });
+            renderTurmaDetalhe();
+          } catch (e2) {
+            alert("Erro ao remover: " + e2.message);
+          }
+        } else {
+          alert("Erro ao remover: " + e.message);
+        }
       }
     });
   });
