@@ -1,5 +1,5 @@
-// Avaliador de expressões aritméticas simples (+ - * / parênteses), sem usar eval().
-// Aceita letras latinas e gregas nos nomes de variáveis (ex.: F/m, 2*ρ1*ρ2/(ρ1+ρ2)).
+// Avaliador de expressões aritméticas (+ - * / ^ e parênteses), sem usar eval().
+// Aceita letras latinas e gregas nos nomes de variáveis (ex.: F/m, 2*ρ1*ρ2/(ρ1+ρ2), H^3).
 export function avaliarExpressao(expr: string, vars: Record<string, number>): number {
   const s = expr.replace(/\s+/g, "");
   let i = 0;
@@ -28,17 +28,34 @@ export function avaliarExpressao(expr: string, vars: Record<string, number>): nu
       i++;
       return v;
     }
-    if (peek() === "-") { i++; return -parsePrimary(); }
     if (/[0-9.]/.test(peek())) return parseNumber();
     if (/[A-Za-zΑ-Ωα-ω_]/.test(peek())) return parseIdent();
     throw new Error("Expressão inválida perto de: " + s.slice(i));
   }
 
+  // unário: -X ou +X (tem precedência MENOR que potência, então -H^2 = -(H^2), igual na matemática normal)
+  function parseUnary(): number {
+    if (peek() === "-") { i++; return -parseUnary(); }
+    if (peek() === "+") { i++; return parseUnary(); }
+    return parsePower();
+  }
+
+  // potência: H^3, com ^ associando da direita pra esquerda (2^3^2 = 2^(3^2))
+  function parsePower(): number {
+    const base = parsePrimary();
+    if (peek() === "^") {
+      i++;
+      const expoente = parseUnary();
+      return Math.pow(base, expoente);
+    }
+    return base;
+  }
+
   function parseTerm(): number {
-    let v = parsePrimary();
+    let v = parseUnary();
     while (peek() === "*" || peek() === "/") {
       const op = s[i]; i++;
-      const r = parsePrimary();
+      const r = parseUnary();
       v = op === "*" ? v * r : v / r;
     }
     return v;
