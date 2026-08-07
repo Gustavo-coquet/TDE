@@ -5,6 +5,10 @@ const content = document.getElementById("content");
 
 const state = { prova: null, atual: 0, respostas: {} };
 
+function formatarBR(n) {
+  return Number(n).toLocaleString("pt-BR");
+}
+
 async function api(path, options) {
   const res = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
   if (!res.ok) {
@@ -78,11 +82,11 @@ function renderDecisao(dados) {
   content.innerHTML = `
     <div style="text-align:center; display:flex; flex-direction:column; gap:16px; align-items:center; padding-top:20px;">
       <div style="width:92px; height:92px; border-radius:50%; border:2px solid var(--teal); display:flex; align-items:center; justify-content:center;">
-        <span style="font-family:var(--f-display); font-size:22px; font-weight:700; color:var(--teal);">${dados.melhorNota.toFixed(1)}</span>
+        <span style="font-family:var(--f-display); font-size:22px; font-weight:700; color:var(--teal);">${formatarBR(+dados.melhorNota.toFixed(1))}</span>
       </div>
       <h1 style="font-size:20px;">${dados.tituloProva}</h1>
       <p class="muted" style="font-size:13.5px;">
-        Olá, <b style="color:var(--ink);">${dados.alunoNome}</b>! Sua melhor nota até agora é <b style="color:var(--ink);">${dados.melhorNota.toFixed(1)} de ${dados.valor}</b>,
+        Olá, <b style="color:var(--ink);">${dados.alunoNome}</b>! Sua melhor nota até agora é <b style="color:var(--ink);">${formatarBR(+dados.melhorNota.toFixed(1))} de ${formatarBR(dados.valor)}</b>,
         em ${dados.tentativasFeitas} tentativa${dados.tentativasFeitas > 1 ? "s" : ""}.
       </p>
       ${dados.podeTentarDeNovo ? `
@@ -132,7 +136,7 @@ function renderInstrucoes() {
         <div style="font-weight:600; font-size:15px; margin-bottom:4px;">${p.tituloProva}</div>
         <div class="muted" style="font-size:12.5px; margin-bottom:10px;">Tentativa ${p.tentativa} de no máximo 2</div>
         <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Este TDE tem</span><span>${p.questoes.length} questões</span></div>
-        <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">e vale</span><span style="color:var(--teal); font-weight:600;">${p.valor} pontos</span></div>
+        <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">e vale</span><span style="color:var(--teal); font-weight:600;">${formatarBR(p.valor)} pontos</span></div>
         <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Matrícula</span><span class="mono" style="color:var(--teal);">${token}</span></div>
         ${p.prazoFinal ? `<div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Prazo final</span><span>${new Date(p.prazoFinal).toLocaleString("pt-BR")}</span></div>` : ""}
       </div>
@@ -170,7 +174,7 @@ function renderProva() {
         ${q.alternativas.map((a) => `
           <div class="option ${state.respostas[q.id]===a.letra?'selected':''}" data-letra="${a.letra}">
             <div class="option-letter">${a.letra}</div>
-            <span class="mono" style="font-size:14px;">${a.campos.map(c => `${c.nome} = ${c.valor} ${c.unidade}`).join("   |   ")}</span>
+            <span class="mono" style="font-size:14px;">${a.campos.map(c => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ")}</span>
           </div>
         `).join("")}
       </div>
@@ -254,7 +258,7 @@ function renderResultado(r) {
       <h1 style="font-size:22px;">Tentativa ${r.tentativa} corrigida automaticamente</h1>
       <p class="muted" style="font-size:14px;">
         Você acertou <b style="color:var(--ink);">${r.acertos} de ${r.total}</b> questões —
-        nota <b style="color:var(--ink);">${r.notaPontos.toFixed(1)} de ${r.valor}</b>.
+        nota <b style="color:var(--ink);">${formatarBR(+r.notaPontos.toFixed(1))} de ${formatarBR(r.valor)}</b>.
       </p>
       <div style="display:flex; flex-direction:column; gap:8px; width:100%;">
         ${r.detalhe.map((d) => `
