@@ -268,6 +268,7 @@ function renderResultado(r) {
           </div>
         `).join("")}
       </div>
+      <button class="btn subtle" id="btn-baixar-pdf">⬇ Baixar comprovante em PDF</button>
       ${r.podeTentarDeNovo ? `
         <div class="card" style="width:100%; text-align:center; margin-top:8px;">
           <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
@@ -300,6 +301,61 @@ function renderResultado(r) {
   }
   const btnFim = document.getElementById("btn-encerrar");
   if (btnFim) btnFim.addEventListener("click", () => carregarEstado());
+
+  document.getElementById("btn-baixar-pdf").addEventListener("click", () => gerarPDF(r));
+
+  // gera automaticamente, sem o aluno precisar pedir — serve de comprovante caso precise contestar algo
+  try { gerarPDF(r); } catch (e) { console.error("Falha ao gerar PDF automático:", e); }
+}
+
+// monta um PDF com o comprovante completo da tentativa: questões, o que o aluno marcou,
+// a alternativa correta, e o resultado — pra ele ter um registro e poder contestar se precisar.
+function gerarPDF(r) {
+  if (!window.jspdf) { console.warn("jsPDF não carregou; pulando geração automática de PDF."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const margem = 15;
+  const larguraUtil = 210 - margem * 2;
+  let y = margem;
+
+  function quebrarPagina(alturaNecessaria) {
+    if (y + alturaNecessaria > 282) { doc.addPage(); y = margem; }
+  }
+  function escreverParagrafo(texto, tamanho, negrito) {
+    doc.setFontSize(tamanho);
+    doc.setFont(undefined, negrito ? "bold" : "normal");
+    const linhas = doc.splitTextToSize(texto, larguraUtil);
+    linhas.forEach((linha) => { quebrarPagina(6); doc.text(linha, margem, y); y += tamanho > 11 ? 6.5 : 5.2; });
+  }
+
+  const p = state.prova;
+  escreverParagrafo("TDE - La Salle", 15, true);
+  escreverParagrafo(`${p.tituloProva} — Tentativa ${r.tentativa}`, 11, true);
+  y += 1;
+  escreverParagrafo(`Aluno: ${p.alunoNome}     Matrícula: ${token}`, 10, false);
+  escreverParagrafo(`Nota: ${formatarBR(+r.notaPontos.toFixed(1))} de ${formatarBR(r.valor)}  (${r.percentual}% de acerto — ${r.acertos} de ${r.total} questões)`, 10, false);
+  escreverParagrafo(`Comprovante gerado em: ${new Date().toLocaleString("pt-BR")}`, 9, false);
+  y += 4;
+
+  r.detalhe.forEach((d, idx) => {
+    quebrarPagina(14);
+    doc.setDrawColor(200); doc.line(margem, y, 210 - margem, y); y += 5;
+    escreverParagrafo(`Questão ${idx + 1} — ${d.tema}  [${d.correta ? "ACERTOU" : "ERROU"}]`, 11, true);
+    escreverParagrafo(d.enunciado, 10, false);
+    y += 1;
+    (d.alternativas || []).forEach((a) => {
+      const escolhida = a.letra === d.respostaAlunoLetra;
+      const correta = a.letra === d.respostaCorretaLetra;
+      const marcador = escolhida ? "[X]" : "[ ]";
+      const rotulo = correta ? " (RESPOSTA CORRETA)" : "";
+      const texto = `${marcador} ${a.letra}) ${a.campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("  |  ")}${rotulo}`;
+      escreverParagrafo(texto, 9.5, correta || escolhida);
+    });
+    y += 4;
+  });
+
+  const nomeArquivo = `TDE - ${p.tituloProva} - ${p.alunoNome} - tentativa ${r.tentativa}.pdf`.replace(/[\\/:*?"<>|]/g, "");
+  doc.save(nomeArquivo);
 }
 
 iniciar();
