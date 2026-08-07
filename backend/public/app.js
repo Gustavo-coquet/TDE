@@ -277,12 +277,14 @@ async function renderTurmaDetalhe() {
             </div>
             <div class="row" style="margin-top:6px;">
               <span class="muted" style="font-size:11.5px;">${p.totalQuestoes} questões · vale ${p.valor} pts · ${p.totalAlunos} alunos${p.prazoFinal ? ` · prazo até ${new Date(p.prazoFinal).toLocaleDateString("pt-BR")}` : ""}</span>
-              <div style="display:flex; gap:6px;">
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-add-alunos-tde="${p.id}">+ Alunos novos</button>` : ""}
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-links-tde="${p.id}">Ver links</button>` : ""}
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-resultado-tde="${p.id}">Resultados</button>` : ""}
                 <button class="btn danger" style="font-size:11px; padding:4px 8px;" data-apagar-tde="${p.id}">Apagar</button>
               </div>
             </div>
+            <div id="add-alunos-tde-${p.id}"></div>
             <div id="links-tde-${p.id}"></div>
           </div>
         `).join("")}
@@ -350,6 +352,57 @@ async function renderTurmaDetalhe() {
 
   content.querySelectorAll("[data-ver-resultado-tde]").forEach((el) => {
     el.addEventListener("click", () => setView("resultados", { provaAtualId: el.dataset.verResultadoTde }));
+  });
+
+  content.querySelectorAll("[data-add-alunos-tde]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const provaId = el.dataset.addAlunosTde;
+      const alvo = document.getElementById(`add-alunos-tde-${provaId}`);
+      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+      alvo.innerHTML = `<div class="muted mono" style="font-size:11px; padding:8px 0;">Carregando…</div>`;
+      try {
+        const links = await api(`/provas-mestre/${provaId}/links`);
+        const idsComProva = new Set(links.map((l) => l.alunoId));
+        const faltando = alunos.filter((a) => !idsComProva.has(a.id));
+
+        if (faltando.length === 0) {
+          alvo.innerHTML = `<div class="ok-box" style="margin-top:8px;">Todos os alunos da turma já têm prova gerada neste TDE.</div>`;
+          return;
+        }
+
+        alvo.innerHTML = `
+          <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint);">
+            <div class="mono muted" style="font-size:10.5px; margin-bottom:8px; text-transform:uppercase;">Alunos da turma que ainda não têm prova neste TDE (${faltando.length})</div>
+            ${faltando.map((a) => `
+              <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="chk-add-aluno" value="${a.id}" checked style="width:auto;" /> ${a.nome}
+              </label>
+            `).join("")}
+            <div id="erro-add-alunos" style="margin-top:6px;"></div>
+            <button class="btn" id="btn-confirmar-add-alunos" style="margin-top:10px; font-size:12px; padding:6px 12px;">Gerar prova pra selecionados</button>
+          </div>
+        `;
+
+        document.getElementById("btn-confirmar-add-alunos").addEventListener("click", async (ev) => {
+          const selecionados = Array.from(document.querySelectorAll(".chk-add-aluno:checked")).map((c) => c.value);
+          const erroEl = document.getElementById("erro-add-alunos");
+          if (selecionados.length === 0) { erroEl.innerHTML = `<div class="error-box">Selecione ao menos um aluno.</div>`; return; }
+          ev.target.disabled = true;
+          ev.target.textContent = "Gerando…";
+          try {
+            await api(`/provas-mestre/${provaId}/adicionar-alunos`, { method: "POST", body: JSON.stringify({ alunoIds: selecionados }) });
+            alvo.innerHTML = "";
+            renderTurmaDetalhe();
+          } catch (e) {
+            erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
+            ev.target.disabled = false;
+            ev.target.textContent = "Gerar prova pra selecionados";
+          }
+        });
+      } catch (e) {
+        alvo.innerHTML = `<div class="error-box" style="margin-top:8px;">Erro ao carregar: ${e.message}</div>`;
+      }
+    });
   });
 
   content.querySelectorAll("[data-ver-links-tde]").forEach((el) => {
