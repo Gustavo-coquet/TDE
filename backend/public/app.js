@@ -14,6 +14,7 @@ const state = {
   novaQuestaoImagem: null,
   filtroBanco: { disciplina: "", assunto: "", busca: "" },
   filtroMontar: { disciplina: "", assunto: "", busca: "" },
+  alunosSelecionadosInicializado: false,
 };
 
 const content = document.getElementById("content");
@@ -307,6 +308,7 @@ async function renderTurmaDetalhe() {
   document.getElementById("btn-novo-tde").addEventListener("click", () => {
     state.selecionadas = new Set();
     state.alunosSelecionados = new Set();
+    state.alunosSelecionadosInicializado = false;
     state.publicarResultado = null;
     setView("montar");
   });
@@ -834,8 +836,10 @@ async function renderMontar() {
   const turma = turmas.find((t) => t.id === state.turmaAtualId);
   if (!turma) { setView("turmas"); return; }
 
-  if (state.selecionadas.size === 0) questoes.slice(0, 4).forEach((q) => state.selecionadas.add(q.id));
-  if (state.alunosSelecionados.size === 0) alunos.forEach((a) => state.alunosSelecionados.add(a.id));
+  if (!state.alunosSelecionadosInicializado) {
+    alunos.forEach((a) => state.alunosSelecionados.add(a.id));
+    state.alunosSelecionadosInicializado = true;
+  }
 
   if (alunos.length === 0) {
     content.innerHTML = `<div class="card muted" style="text-align:center; padding:36px; font-size:13px;">${corners()}
