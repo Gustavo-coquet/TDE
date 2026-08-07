@@ -6,7 +6,7 @@ const content = document.getElementById("content");
 const state = { prova: null, atual: 0, respostas: {} };
 
 function formatarBR(n) {
-  return Number(n).toLocaleString("pt-BR");
+  return String(Number(n)).replace(".", ","); // só vírgula decimal, sem separador de milhar
 }
 
 async function api(path, options) {
