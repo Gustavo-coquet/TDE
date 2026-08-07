@@ -97,7 +97,7 @@ function ligarBarraFiltro(idPrefix, filtro, onChange) {
 }
 
 function formatarBR(n) {
-  return Number(n).toLocaleString("pt-BR");
+  return String(Number(n)).replace(".", ","); // só vírgula decimal, sem separador de milhar
 }
 
 async function api(path, options) {
