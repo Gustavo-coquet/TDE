@@ -159,6 +159,7 @@ function renderProva() {
     <div class="progress-track">
       ${p.questoes.map((qq, i) => `<div class="progress-seg ${state.respostas[qq.id] ? 'answered' : (i===state.atual?'current':'')}" data-jump="${i}"></div>`).join("")}
     </div>
+    <div class="muted" style="font-size:11px; margin-bottom:14px;">💾 Suas respostas são salvas automaticamente. Pode pular questões e sair a qualquer momento — depois é só voltar com o mesmo link.</div>
 
     <div class="card">
       <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
@@ -177,9 +178,12 @@ function renderProva() {
 
     <div class="row" style="margin-top:16px;">
       <button class="btn ghost" id="btn-anterior" ${state.atual===0?'disabled':''}>← Anterior</button>
-      ${state.atual < p.questoes.length - 1
-        ? `<button class="btn" id="btn-proxima">Próxima →</button>`
-        : `<button class="btn" id="btn-finalizar">✓ Finalizar prova</button>`}
+      <div style="display:flex; gap:8px;">
+        <button class="btn ghost" id="btn-pausar" style="font-size:12.5px;">Salvar e sair</button>
+        ${state.atual < p.questoes.length - 1
+          ? `<button class="btn" id="btn-proxima">Próxima →</button>`
+          : `<button class="btn" id="btn-finalizar">✓ Finalizar prova</button>`}
+      </div>
     </div>
   `;
 
@@ -209,6 +213,26 @@ function renderProva() {
   if (btnProx) btnProx.addEventListener("click", () => { state.atual++; renderProva(); });
   const btnFim = document.getElementById("btn-finalizar");
   if (btnFim) btnFim.addEventListener("click", finalizar);
+  const btnPausar = document.getElementById("btn-pausar");
+  if (btnPausar) btnPausar.addEventListener("click", () => renderPausado());
+}
+
+function renderPausado() {
+  const p = state.prova;
+  const respondidas = Object.keys(state.respostas).length;
+  content.innerHTML = `
+    <div style="text-align:center; display:flex; flex-direction:column; gap:16px; align-items:center; padding-top:40px;">
+      <div style="width:80px; height:80px; border-radius:50%; border:2px solid var(--teal); display:flex; align-items:center; justify-content:center; font-size:28px;">💾</div>
+      <h1 style="font-size:20px;">Suas respostas estão salvas</h1>
+      <p class="muted" style="font-size:13.5px; line-height:1.7; max-width:420px;">
+        Você respondeu <b style="color:var(--ink);">${respondidas} de ${p.questoes.length}</b> questões até agora.
+        Pode fechar esta página tranquilo(a) — quando quiser continuar, é só abrir o mesmo link de novo
+        ${p.prazoFinal ? `, até <b style="color:var(--ink);">${new Date(p.prazoFinal).toLocaleString("pt-BR")}</b>` : ""}.
+      </p>
+      <button class="btn" id="btn-continuar-respondendo">Continuar respondendo agora</button>
+    </div>
+  `;
+  document.getElementById("btn-continuar-respondendo").addEventListener("click", () => renderProva());
 }
 
 async function finalizar() {
