@@ -106,7 +106,7 @@ export function gerarValores(variaveis: VariavelDb[], rng: Rng): Record<string, 
 }
 
 export function formatarNumeroBR(n: number): string {
-  return n.toLocaleString("pt-BR");
+  return String(n).replace(".", ","); // só troca o ponto decimal por vírgula, sem separador de milhar
 }
 
 export function montarEnunciado(template: string, valores: Record<string, number>): string {
