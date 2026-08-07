@@ -157,8 +157,8 @@ h1 { font-family: var(--f-display); font-size: 26px; font-weight: 600; margin: 0
 .var-row { display: grid; grid-template-columns: 1fr 70px 70px 60px 30px; gap: 6px; margin-bottom: 6px; align-items: center; }
 .var-row input { padding: 6px 8px; font-size: 12px; }
 .etapa-block { border: 1px solid var(--line-faint); background: var(--surface-raised); padding: 10px; margin-bottom: 8px; }
-.etapa-row1 { display: flex; gap: 6px; margin-bottom: 8px; }
-.etapa-row1 input { padding: 6px 8px; font-size: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); }
+.etapa-row1 { display: flex; gap: 6px; margin-bottom: 8px; align-items: flex-start; }
+.etapa-row1 input, .etapa-row1 textarea { padding: 6px 8px; font-size: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); font-family: var(--f-mono); }
 .etapa-row2 { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .etapa-row2 input[type="number"], .etapa-row2 input[type="text"] { padding: 4px 6px; font-size: 11px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); }
 .btn.danger { background: transparent; color: var(--red); border-color: #6B3E3E; }
