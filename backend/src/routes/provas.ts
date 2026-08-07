@@ -214,7 +214,71 @@ provasRouter.get("/:id/links", asyncHandler(async (req, res) => {
     include: { aluno: true },
     orderBy: { aluno: { nome: "asc" } },
   });
-  res.json(provas.map((p) => ({ alunoNome: p.aluno.nome, qrToken: p.qrToken, status: p.status })));
+  res.json(provas.map((p) => ({ alunoId: p.alunoId, alunoNome: p.aluno.nome, qrToken: p.qrToken, status: p.status })));
+}));
+
+// POST /api/provas-mestre/:id/adicionar-alunos   body: { alunoIds: string[] }
+// Gera a prova (tentativa 1) pra alunos que foram matriculados DEPOIS do TDE já ter sido publicado.
+// Ignora silenciosamente quem já tinha prova gerada (não duplica).
+provasRouter.post("/:id/adicionar-alunos", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { alunoIds } = req.body as { alunoIds?: string[] };
+
+  const provaMestre = await prisma.provaMestre.findUnique({
+    where: { id },
+    include: { questoes: { include: { questao: true }, orderBy: { ordem: "asc" } } },
+  });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
+  if (provaMestre.status !== "publicada") return res.status(400).json({ erro: "Este TDE ainda não foi publicado." });
+  if (!Array.isArray(alunoIds) || alunoIds.length === 0) {
+    return res.status(400).json({ erro: "Selecione ao menos um aluno." });
+  }
+
+  const jaTem = await prisma.provaIndividual.findMany({
+    where: { provaMestreId: id, alunoId: { in: alunoIds } },
+    select: { alunoId: true },
+  });
+  const idsComProva = new Set(jaTem.map((j) => j.alunoId));
+  const novosIds = alunoIds.filter((aid) => !idsComProva.has(aid));
+
+  if (novosIds.length === 0) {
+    return res.json({ adicionados: 0, provas: [] });
+  }
+
+  const alunos = await prisma.aluno.findMany({ where: { id: { in: novosIds } }, orderBy: { nome: "asc" } });
+  const questoesBase = provaMestre.questoes.map((pmq) => ({
+    id: pmq.questao.id,
+    enunciado: pmq.questao.enunciado,
+    variaveis: pmq.questao.variaveis as any,
+    etapas: pmq.questao.etapas as any,
+  }));
+
+  const provasCriadas: { alunoId: string; alunoNome: string; qrToken: string }[] = [];
+  for (const aluno of alunos) {
+    const { seed, questoes } = gerarProvaIndividual(provaMestre.id, aluno.id, questoesBase);
+    const provaIndividual = await prisma.provaIndividual.create({
+      data: {
+        provaMestreId: provaMestre.id,
+        alunoId: aluno.id,
+        tentativa: 1,
+        seed,
+        qrToken: aluno.matricula,
+        questoes: {
+          create: questoes.map((q) => ({
+            questao: { connect: { id: q.questaoId } },
+            ordem: q.ordem,
+            parametrosGerados: q.parametrosGerados as any,
+            enunciadoFinal: q.enunciadoFinal,
+            alternativasFinal: q.alternativasFinal as any,
+            respostaCorretaLetra: q.respostaCorretaLetra,
+          })),
+        },
+      },
+    });
+    provasCriadas.push({ alunoId: aluno.id, alunoNome: aluno.nome, qrToken: provaIndividual.qrToken });
+  }
+
+  res.json({ adicionados: provasCriadas.length, provas: provasCriadas });
 }));
 
 // DELETE /api/provas-mestre/:id -> apaga o TDE e tudo que depende dele
