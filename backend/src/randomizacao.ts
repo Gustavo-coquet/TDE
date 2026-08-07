@@ -127,16 +127,17 @@ export function gerarAlternativasMulti(
   saidas: { nome: string; unidade: string; valor: number }[],
   rng: Rng
 ): AlternativaGerada[] {
-  const fatores = [0.5, 0.75, 1.25, 1.5, 2];
+  const TOTAL_ALTERNATIVAS = 8; // A até H — só uma correta, dificulta o chute
+  const fatores = [0.4, 0.5, 0.6, 0.75, 1.25, 1.5, 1.75, 2, 2.5];
 
   const pools = saidas.map((s) => {
     const valores = new Set<number>();
     let tentativas = 0;
-    while (valores.size < 3 && tentativas < 60) {
+    while (valores.size < TOTAL_ALTERNATIVAS - 1 && tentativas < 150) {
       tentativas++;
       const fator = fatores[rng.int(0, fatores.length - 1)];
       const sinal = rng.int(0, 1) ? 1 : -1;
-      const errado = round2(s.valor * fator + sinal * rng.int(1, 3));
+      const errado = round2(s.valor * fator + sinal * rng.int(1, 5));
       if (errado > 0 && errado !== s.valor && !valores.has(errado)) valores.add(errado);
     }
     return Array.from(valores);
@@ -146,7 +147,7 @@ export function gerarAlternativasMulti(
   const tuplas: number[][] = [tuplaCorreta];
 
   let tentativas = 0;
-  while (tuplas.length < 5 && tentativas < 300) {
+  while (tuplas.length < TOTAL_ALTERNATIVAS && tentativas < 600) {
     tentativas++;
     const tupla = saidas.map((s, i) => {
       const pool = pools[i];
@@ -158,8 +159,8 @@ export function gerarAlternativasMulti(
     const jaExiste = tuplas.some((t) => t.every((v, i) => v === tupla[i]));
     if (!igualCorreta && !jaExiste) tuplas.push(tupla);
   }
-  // fallback caso não tenha conseguido gerar 5 tuplas distintas (campos com pouca variação possível)
-  while (tuplas.length < 5) {
+  // fallback caso não tenha conseguido gerar tuplas suficientes distintas (campos com pouca variação possível)
+  while (tuplas.length < TOTAL_ALTERNATIVAS) {
     const tupla = saidas.map((s, i) => {
       const pool = pools[i];
       const base = pool.length ? pool[rng.int(0, pool.length - 1)] : s.valor;
