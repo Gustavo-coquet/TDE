@@ -213,6 +213,7 @@ alunoExamRouter.post("/:provaMestreId/:token/finalizar", asyncHandler(async (req
     detalhe: ativa.questoes.map((q) => ({
       tema: `${q.questao.disciplina} — ${q.questao.assunto}`,
       enunciado: q.enunciadoFinal,
+      alternativas: (q.alternativasFinal as any[]).map((a) => ({ letra: a.letra, campos: a.campos })),
       respostaAlunoLetra: q.respostaAlunoLetra,
       respostaCorretaLetra: q.respostaCorretaLetra,
       correta: q.correta,
