@@ -47,13 +47,32 @@ alunosRouter.post("/", asyncHandler(async (req, res) => {
   res.status(201).json({ criados, erros });
 }));
 
-// DELETE /api/alunos/:id
+// DELETE /api/alunos/:id   body opcional: { senha }
+// Se o aluno já tem TDEs respondidos, exige a senha do professor pra confirmar
+// (apaga em cascata: respostas, provas individuais, e por fim o aluno).
 alunosRouter.delete("/:id", asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const { senha } = (req.body || {}) as { senha?: string };
+
+  const totalProvas = await prisma.provaIndividual.count({ where: { alunoId: id } });
+
+  if (totalProvas > 0) {
+    const senhaEsperada = process.env.PROFESSOR_SENHA;
+    if (senhaEsperada && senha !== senhaEsperada) {
+      return res.status(403).json({ erro: "Senha incorreta. Este aluno já respondeu algum TDE — a exclusão foi bloqueada." });
+    }
+    await prisma.$transaction([
+      prisma.provaIndividualQuestao.deleteMany({ where: { provaIndividual: { alunoId: id } } }),
+      prisma.provaIndividual.deleteMany({ where: { alunoId: id } }),
+      prisma.aluno.delete({ where: { id } }),
+    ]);
+    return res.json({ ok: true, historicoApagado: true });
+  }
+
   try {
     await prisma.aluno.delete({ where: { id } });
     res.json({ ok: true });
   } catch (e: any) {
-    res.status(400).json({ erro: "Não foi possível remover: esse aluno já tem provas geradas vinculadas a ele." });
+    res.status(400).json({ erro: "Não foi possível remover este aluno." });
   }
 }));
