@@ -105,10 +105,14 @@ export function gerarValores(variaveis: VariavelDb[], rng: Rng): Record<string, 
   return valores;
 }
 
+export function formatarNumeroBR(n: number): string {
+  return n.toLocaleString("pt-BR");
+}
+
 export function montarEnunciado(template: string, valores: Record<string, number>): string {
   let out = template;
   for (const [k, v] of Object.entries(valores)) {
-    out = out.split(`{${k}}`).join(String(v));
+    out = out.split(`{${k}}`).join(formatarNumeroBR(v));
   }
   return out;
 }
