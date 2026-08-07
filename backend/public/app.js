@@ -96,6 +96,10 @@ function ligarBarraFiltro(idPrefix, filtro, onChange) {
   });
 }
 
+function formatarBR(n) {
+  return Number(n).toLocaleString("pt-BR");
+}
+
 async function api(path, options) {
   const res = await fetch(`/api${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -493,7 +497,7 @@ async function renderBanco(mostrarForm) {
 
 // monta o texto de uma alternativa combinando todos os campos (ex.: "I=29947.5 cm⁴, σ=0.145 kN/cm²")
 function textoAlternativa(campos) {
-  return campos.map((c) => `${c.nome} = ${c.valor} ${c.unidade}`).join("   |   ");
+  return campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
 }
 
 function renderAlternativasPreview(alternativas) {
@@ -980,9 +984,9 @@ async function renderResultados() {
     </div>
 
     <div class="grid-stats" style="margin-bottom:14px;">
-      <div class="card">${corners()}<div class="stat-label">Média</div><div class="stat-value">${r.media ?? "—"}</div></div>
-      <div class="card">${corners()}<div class="stat-label">Mediana</div><div class="stat-value">${r.mediana ?? "—"}</div></div>
-      <div class="card">${corners()}<div class="stat-label">Desvio padrão</div><div class="stat-value">${r.desvioPadrao ?? "—"}</div></div>
+      <div class="card">${corners()}<div class="stat-label">Média</div><div class="stat-value">${r.media !== null ? formatarBR(r.media) : "—"}</div></div>
+      <div class="card">${corners()}<div class="stat-label">Mediana</div><div class="stat-value">${r.mediana !== null ? formatarBR(r.mediana) : "—"}</div></div>
+      <div class="card">${corners()}<div class="stat-label">Desvio padrão</div><div class="stat-value">${r.desvioPadrao !== null ? formatarBR(r.desvioPadrao) : "—"}</div></div>
     </div>
 
     <div class="card" style="margin-bottom:14px;">
@@ -999,7 +1003,7 @@ async function renderResultados() {
     <div class="card">
       ${corners()}
       <div class="row" style="margin-bottom:6px;">
-        <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase;">Notas por aluno (${r.totalFinalizadas}/${r.totalAlunos} finalizaram) — vale ${r.valor} pts</div>
+        <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase;">Notas por aluno (${r.totalFinalizadas}/${r.totalAlunos} finalizaram) — vale ${formatarBR(r.valor)} pts</div>
         <button class="btn subtle" id="btn-exportar-excel" style="font-size:11px; padding:5px 10px;">Exportar Excel</button>
       </div>
       ${r.alunos.map((a, i) => `
@@ -1007,7 +1011,7 @@ async function renderResultados() {
           <span style="font-size:13.5px;">${a.alunoNome}</span>
           <span class="mono muted" style="font-size:12px;">${a.status === 'finalizada' ? `${a.acertos}/${a.total} acertos${a.tentativasFeitas>1?` (${a.tentativasFeitas} tentativas)`:''}` : a.status}</span>
           <span style="font-family:var(--f-display); font-weight:700; font-size:15px; width:50px; text-align:right; color:${a.nota===null?'var(--ink-faint)':(a.nota>=r.valor*0.6?'var(--green)':'var(--red)')};">
-            ${a.nota !== null ? a.nota.toFixed(1) : "—"}
+            ${a.nota !== null ? formatarBR(+a.nota.toFixed(1)) : "—"}
           </span>
         </div>
       `).join("")}
@@ -1023,8 +1027,8 @@ async function renderResultados() {
     const linhas = r.alunos.map((a) => ({
       "Aluno": a.alunoNome,
       "Matrícula": a.matricula,
-      "Nota": a.nota !== null ? a.nota.toFixed(1) : "",
-      "Valor do TDE": r.valor,
+      "Nota": a.nota !== null ? formatarBR(+a.nota.toFixed(1)) : "",
+      "Valor do TDE": formatarBR(r.valor),
       "Acertos": a.status === "finalizada" ? `${a.acertos}/${a.total}` : "",
       "Tentativas": a.tentativasFeitas,
       "Situação": a.nota === null ? "Não finalizou" : (a.nota >= r.valor * 0.6 ? "Aprovado" : "Reprovado"),
