@@ -8,8 +8,9 @@ export function avaliarExpressao(expr: string, vars: Record<string, number>): nu
 
   function parseNumber(): number {
     const start = i;
-    while (i < s.length && /[0-9.]/.test(s[i])) i++;
-    return parseFloat(s.slice(start, i));
+    while (i < s.length && /[0-9.,]/.test(s[i])) i++;
+    const bruto = s.slice(start, i).replace(",", "."); // aceita vírgula como separador decimal (padrão BR)
+    return parseFloat(bruto);
   }
 
   function parseIdent(): number {
