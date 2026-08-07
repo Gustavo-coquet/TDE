@@ -665,7 +665,7 @@ function renderFormNovaQuestao(container) {
       <div class="etapa-block">
         <div class="etapa-row1">
           <input placeholder="nome do resultado (ex: I)" value="${et.nome}" data-ei="${i}" data-ecampo="nome" class="mono" style="width:140px;" />
-          <input placeholder="fórmula (ex: (b*h^3)/12 → use b*h*h*h)" value="${et.formula}" data-ei="${i}" data-ecampo="formula" class="mono" style="flex:1;" />
+          <textarea placeholder="fórmula (ex: (b*h*h*h)/12 — pode arrastar o canto pra aumentar)" data-ei="${i}" data-ecampo="formula" class="mono" rows="1" style="flex:1; min-height:38px; resize:vertical;">${et.formula}</textarea>
           <button class="btn danger" style="padding:5px 8px;" data-remove-etapa="${i}" type="button">×</button>
         </div>
         <div class="etapa-row2">
