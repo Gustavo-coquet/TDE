@@ -183,7 +183,7 @@ export function gerarAlternativasMulti(
       const fator = fatores[rng.int(0, fatores.length - 1)];
       const sinal = rng.int(0, 1) ? 1 : -1;
       const errado = round2(s.valor * fator + sinal * rng.int(1, 5));
-      if (errado > 0 && errado !== s.valor && !valores.has(errado)) valores.add(errado);
+      if (errado !== s.valor && !valores.has(errado)) valores.add(errado); // aceita negativo também (Ry, ângulos, etc. podem ser negativos)
     }
     return Array.from(valores);
   });
