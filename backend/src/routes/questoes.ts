@@ -55,7 +55,7 @@ questoesRouter.post("/testar", asyncHandler(async (req, res) => {
 // POST /api/questoes -> cadastrar nova questão parametrizada
 // body: { disciplina, assunto, dificuldade, enunciado, variaveis: [{nome,min,max,decimais}], etapas: [{nome,formula,decimais,unidade,saida}] }
 questoesRouter.post("/", asyncHandler(async (req, res) => {
-  const { disciplina, assunto, dificuldade, enunciado, variaveis, etapas, imagem } = req.body;
+  const { disciplina, assunto, dificuldade, enunciado, variaveis, etapas, imagem, formatoResposta } = req.body;
 
   if (!disciplina || !assunto || !enunciado || !Array.isArray(variaveis) || variaveis.length === 0 || !Array.isArray(etapas) || etapas.length === 0) {
     return res.status(400).json({ erro: "disciplina, assunto, enunciado, ao menos uma variável e ao menos uma etapa são obrigatórios." });
@@ -80,6 +80,7 @@ questoesRouter.post("/", asyncHandler(async (req, res) => {
       variaveis,
       etapas,
       imagem: imagem || null,
+      formatoResposta: formatoResposta || null,
     },
   });
 
@@ -90,7 +91,7 @@ questoesRouter.post("/", asyncHandler(async (req, res) => {
 // body: { disciplina, assunto, dificuldade, enunciado, variaveis, etapas }
 questoesRouter.put("/:id", asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { disciplina, assunto, dificuldade, enunciado, variaveis, etapas, imagem } = req.body;
+  const { disciplina, assunto, dificuldade, enunciado, variaveis, etapas, imagem, formatoResposta } = req.body;
 
   if (!disciplina || !assunto || !enunciado || !Array.isArray(variaveis) || variaveis.length === 0 || !Array.isArray(etapas) || etapas.length === 0) {
     return res.status(400).json({ erro: "disciplina, assunto, enunciado, ao menos uma variável e ao menos uma etapa são obrigatórios." });
@@ -115,6 +116,7 @@ questoesRouter.put("/:id", asyncHandler(async (req, res) => {
       variaveis,
       etapas,
       imagem: imagem === undefined ? undefined : (imagem || null),
+      formatoResposta: formatoResposta === undefined ? undefined : (formatoResposta || null),
     },
   });
 
