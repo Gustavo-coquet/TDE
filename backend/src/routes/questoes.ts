@@ -1,135 +1,224 @@
 import { Router } from "express";
 import { prisma } from "../db";
-import { Rng, hashSeed } from "../rng";
-import { resolverEtapas, montarEnunciado, gerarAlternativasMulti, VariavelDb, EtapaDb } from "../randomizacao";
 import { asyncHandler } from "../asyncHandler";
+import { gerarProvaIndividual } from "../randomizacao";
 
-export const questoesRouter = Router();
+export const alunoExamRouter = Router();
 
-function preview(enunciadoTemplate: string, variaveis: VariavelDb[], etapas: EtapaDb[], seed: number) {
-  const rng = new Rng(seed);
-  const valores = resolverEtapas(variaveis, etapas, rng);
-  const enunciado = montarEnunciado(enunciadoTemplate, valores);
-  const saidas = etapas.filter((e) => e.saida).map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] }));
-  const alternativas = gerarAlternativasMulti(saidas, rng);
-  return { enunciado, saidas, alternativas };
+function mapQuestoes(questoes: any[]) {
+  return questoes.map((q) => ({
+    id: q.id,
+    tema: `${q.questao.disciplina} — ${q.questao.assunto}`,
+    enunciado: q.enunciadoFinal,
+    imagem: q.questao.imagem,
+    formatoResposta: q.questao.formatoResposta,
+    respostaAlunoLetra: q.respostaAlunoLetra,
+    alternativas: (q.alternativasFinal as any[]).map((a) => ({ letra: a.letra, campos: a.campos })), // sem "correta"
+  }));
 }
 
-// GET /api/questoes  -> banco de questões + um preview parametrizado (seed fixa, só para exibição)
-questoesRouter.get("/", asyncHandler(async (_req, res) => {
-  const questoes = await prisma.questao.findMany({ orderBy: { criadoEm: "asc" } });
+function prazoEncerrado(provaMestre: { prazoFinal: Date | null }) {
+  return !!provaMestre.prazoFinal && new Date() > provaMestre.prazoFinal;
+}
 
-  const comPreview = questoes.map((q) => {
-    const variaveis = q.variaveis as unknown as VariavelDb[];
-    const etapas = q.etapas as unknown as EtapaDb[];
-    let p: any;
-    try {
-      p = { ...preview(q.enunciado, variaveis, etapas, hashSeed(q.id + ":preview")), erro: null };
-    } catch (e: any) {
-      p = { enunciado: q.enunciado, saidas: [], alternativas: [], erro: e.message };
+// GET /api/prova/:provaMestreId/:token -> estado atual do aluno nesse TDE
+// :token é a matrícula do aluno. Retorna um destes formatos:
+//  { estado: "em_andamento", tentativa, questoes: [...] }               -> aluno está resolvendo (nova ou retomando)
+//  { estado: "aguardando_decisao", melhorNota, tentativasFeitas, podeTentarDeNovo } -> já tem tentativa(s) finalizada(s)
+alunoExamRouter.get("/:provaMestreId/:token", asyncHandler(async (req, res) => {
+  const { provaMestreId, token } = req.params;
+
+  const provaMestre = await prisma.provaMestre.findUnique({ where: { id: provaMestreId } });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
+
+  const aluno = await prisma.aluno.findFirst({ where: { turmaId: provaMestre.turmaId, matricula: token } });
+  if (!aluno) return res.status(404).json({ erro: "Matrícula não encontrada para este TDE." });
+
+  const tentativas = await prisma.provaIndividual.findMany({
+    where: { provaMestreId, alunoId: aluno.id },
+    orderBy: { tentativa: "asc" },
+    include: { questoes: { include: { questao: true }, orderBy: { ordem: "asc" } } },
+  });
+
+  if (tentativas.length === 0) {
+    return res.status(404).json({ erro: "Prova não encontrada para este aluno. Fale com o professor(a)." });
+  }
+
+  const ativa = tentativas.find((t) => t.status !== "finalizada");
+
+  if (ativa) {
+    if (prazoEncerrado(provaMestre) && ativa.status === "gerada") {
+      return res.status(403).json({ erro: `O prazo para responder este TDE encerrou em ${provaMestre.prazoFinal!.toLocaleString("pt-BR")}.` });
     }
-    return { ...q, preview: p };
+    if (ativa.status === "gerada") {
+      await prisma.provaIndividual.update({ where: { id: ativa.id }, data: { status: "em_andamento", iniciadaEm: new Date() } });
+    }
+    return res.json({
+      estado: "em_andamento",
+      tentativa: ativa.tentativa,
+      alunoNome: aluno.nome,
+      tituloProva: provaMestre.titulo,
+      prazoFinal: provaMestre.prazoFinal,
+      valor: provaMestre.valor,
+      questoes: mapQuestoes(ativa.questoes),
+    });
+  }
+
+  // todas as tentativas existentes já foram finalizadas
+  const notas = tentativas.map((t) => (t.total ? +((t.acertos! / t.total) * provaMestre.valor).toFixed(2) : 0));
+  const melhorNota = Math.max(...notas);
+  const podeTentarDeNovo = tentativas.length < 2 && !prazoEncerrado(provaMestre);
+
+  res.json({
+    estado: "aguardando_decisao",
+    alunoNome: aluno.nome,
+    tituloProva: provaMestre.titulo,
+    tentativasFeitas: tentativas.length,
+    valor: provaMestre.valor,
+    melhorNota,
+    podeTentarDeNovo,
   });
-
-  res.json(comPreview);
 }));
 
-// POST /api/questoes/testar -> valida e gera um exemplo completo, SEM salvar no banco
-// body: { enunciado, variaveis, etapas }
-questoesRouter.post("/testar", asyncHandler(async (req, res) => {
-  const { enunciado, variaveis, etapas } = req.body;
-  if (!enunciado || !Array.isArray(variaveis) || variaveis.length === 0 || !Array.isArray(etapas) || etapas.length === 0) {
-    return res.status(400).json({ erro: "Preencha enunciado, ao menos uma variável e ao menos uma etapa." });
-  }
-  if (!etapas.some((e: EtapaDb) => e.saida)) {
-    return res.status(400).json({ erro: "Marque ao menos uma etapa como \"saída\" (resposta mostrada ao aluno)." });
-  }
-  try {
-    const resultado = preview(enunciado, variaveis, etapas, Date.now() % 100000 + 1);
-    res.json(resultado);
-  } catch (e: any) {
-    res.status(400).json({ erro: e.message });
-  }
-}));
+// POST /api/prova/:provaMestreId/:token/nova-tentativa -> gera e inicia a 2ª tentativa
+alunoExamRouter.post("/:provaMestreId/:token/nova-tentativa", asyncHandler(async (req, res) => {
+  const { provaMestreId, token } = req.params;
 
-// POST /api/questoes -> cadastrar nova questão parametrizada
-// body: { disciplina, assunto, dificuldade, enunciado, variaveis: [{nome,min,max,decimais}], etapas: [{nome,formula,decimais,unidade,saida}] }
-questoesRouter.post("/", asyncHandler(async (req, res) => {
-  const { disciplina, assunto, dificuldade, enunciado, variaveis, etapas, imagem, formatoResposta } = req.body;
-
-  if (!disciplina || !assunto || !enunciado || !Array.isArray(variaveis) || variaveis.length === 0 || !Array.isArray(etapas) || etapas.length === 0) {
-    return res.status(400).json({ erro: "disciplina, assunto, enunciado, ao menos uma variável e ao menos uma etapa são obrigatórios." });
-  }
-  if (!etapas.some((e: EtapaDb) => e.saida)) {
-    return res.status(400).json({ erro: "Marque ao menos uma etapa como \"saída\" (resposta mostrada ao aluno)." });
+  const provaMestre = await prisma.provaMestre.findUnique({
+    where: { id: provaMestreId },
+    include: { questoes: { include: { questao: true }, orderBy: { ordem: "asc" } } },
+  });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
+  if (prazoEncerrado(provaMestre)) {
+    return res.status(403).json({ erro: `O prazo para responder este TDE encerrou em ${provaMestre.prazoFinal!.toLocaleString("pt-BR")}.` });
   }
 
-  // valida gerando um exemplo antes de salvar, para não deixar questão quebrada no banco
-  try {
-    preview(enunciado, variaveis, etapas, Date.now() % 100000 + 1);
-  } catch (e: any) {
-    return res.status(400).json({ erro: `Fórmulas ou variáveis inválidas: ${e.message}` });
+  const aluno = await prisma.aluno.findFirst({ where: { turmaId: provaMestre.turmaId, matricula: token } });
+  if (!aluno) return res.status(404).json({ erro: "Matrícula não encontrada." });
+
+  const tentativasExistentes = await prisma.provaIndividual.findMany({ where: { provaMestreId, alunoId: aluno.id } });
+  if (tentativasExistentes.length >= 2) return res.status(400).json({ erro: "Você já usou as duas tentativas permitidas para este TDE." });
+  if (tentativasExistentes.some((t) => t.status !== "finalizada")) {
+    return res.status(400).json({ erro: "Finalize a tentativa em andamento antes de iniciar outra." });
   }
 
-  const questao = await prisma.questao.create({
+  const proximaTentativa = tentativasExistentes.length + 1;
+  const questoesBase = provaMestre.questoes.map((pmq) => ({
+    id: pmq.questao.id,
+    enunciado: pmq.questao.enunciado,
+    variaveis: pmq.questao.variaveis as any,
+    etapas: pmq.questao.etapas as any,
+  }));
+
+  // seed diferente da 1ª tentativa, pra sortear outros valores — mas continua determinística/auditável
+  const { seed, questoes } = gerarProvaIndividual(`${provaMestreId}:t${proximaTentativa}`, aluno.id, questoesBase);
+
+  const novaProva = await prisma.provaIndividual.create({
     data: {
-      disciplina,
-      assunto,
-      dificuldade: Number(dificuldade) || 1,
-      enunciado,
-      variaveis,
-      etapas,
-      imagem: imagem || null,
-      formatoResposta: formatoResposta || null,
+      provaMestreId,
+      alunoId: aluno.id,
+      tentativa: proximaTentativa,
+      seed,
+      qrToken: aluno.matricula,
+      status: "em_andamento",
+      iniciadaEm: new Date(),
+      questoes: {
+        create: questoes.map((q) => ({
+          questao: { connect: { id: q.questaoId } },
+          ordem: q.ordem,
+          parametrosGerados: q.parametrosGerados as any,
+          enunciadoFinal: q.enunciadoFinal,
+          alternativasFinal: q.alternativasFinal as any,
+          respostaCorretaLetra: q.respostaCorretaLetra,
+        })),
+      },
     },
+    include: { questoes: { include: { questao: true }, orderBy: { ordem: "asc" } } },
   });
 
-  res.status(201).json(questao);
+  res.json({
+    estado: "em_andamento",
+    tentativa: proximaTentativa,
+    alunoNome: aluno.nome,
+    tituloProva: provaMestre.titulo,
+    prazoFinal: provaMestre.prazoFinal,
+    valor: provaMestre.valor,
+    questoes: mapQuestoes(novaProva.questoes),
+  });
 }));
 
-// PUT /api/questoes/:id -> edita uma questão existente
-// body: { disciplina, assunto, dificuldade, enunciado, variaveis, etapas }
-questoesRouter.put("/:id", asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { disciplina, assunto, dificuldade, enunciado, variaveis, etapas, imagem, formatoResposta } = req.body;
+// POST /api/prova/:provaMestreId/:token/responder  { provaIndividualQuestaoId, letra }
+alunoExamRouter.post("/:provaMestreId/:token/responder", asyncHandler(async (req, res) => {
+  const { provaMestreId, token } = req.params;
+  const { provaIndividualQuestaoId, letra } = req.body;
 
-  if (!disciplina || !assunto || !enunciado || !Array.isArray(variaveis) || variaveis.length === 0 || !Array.isArray(etapas) || etapas.length === 0) {
-    return res.status(400).json({ erro: "disciplina, assunto, enunciado, ao menos uma variável e ao menos uma etapa são obrigatórios." });
-  }
-  if (!etapas.some((e: EtapaDb) => e.saida)) {
-    return res.status(400).json({ erro: "Marque ao menos uma etapa como \"saída\" (resposta mostrada ao aluno)." });
+  const provaMestre = await prisma.provaMestre.findUnique({ where: { id: provaMestreId } });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
+
+  const aluno = await prisma.aluno.findFirst({ where: { turmaId: provaMestre.turmaId, matricula: token } });
+  if (!aluno) return res.status(404).json({ erro: "Matrícula não encontrada." });
+
+  const ativa = await prisma.provaIndividual.findFirst({ where: { provaMestreId, alunoId: aluno.id, status: { not: "finalizada" } } });
+  if (!ativa) return res.status(400).json({ erro: "Nenhuma tentativa em andamento encontrada." });
+
+  const questao = await prisma.provaIndividualQuestao.findUnique({ where: { id: provaIndividualQuestaoId } });
+  if (!questao || questao.provaIndividualId !== ativa.id) {
+    return res.status(400).json({ erro: "Questão inválida para esta prova." });
   }
 
-  try {
-    preview(enunciado, variaveis, etapas, Date.now() % 100000 + 1);
-  } catch (e: any) {
-    return res.status(400).json({ erro: `Fórmulas ou variáveis inválidas: ${e.message}` });
-  }
-
-  const questao = await prisma.questao.update({
-    where: { id },
-    data: {
-      disciplina,
-      assunto,
-      dificuldade: Number(dificuldade) || 1,
-      enunciado,
-      variaveis,
-      etapas,
-      imagem: imagem === undefined ? undefined : (imagem || null),
-      formatoResposta: formatoResposta === undefined ? undefined : (formatoResposta || null),
-    },
+  await prisma.provaIndividualQuestao.update({
+    where: { id: provaIndividualQuestaoId },
+    data: { respostaAlunoLetra: letra, correta: letra === questao.respostaCorretaLetra },
   });
 
-  res.json(questao);
+  res.json({ ok: true });
 }));
 
-// DELETE /api/questoes/:id
-questoesRouter.delete("/:id", asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  try {
-    await prisma.questao.delete({ where: { id } });
-    res.json({ ok: true });
-  } catch (e: any) {
-    res.status(400).json({ erro: "Não foi possível remover: essa questão já está em uso em algum TDE." });
-  }
+// POST /api/prova/:provaMestreId/:token/finalizar -> corrige automaticamente e retorna o resultado
+alunoExamRouter.post("/:provaMestreId/:token/finalizar", asyncHandler(async (req, res) => {
+  const { provaMestreId, token } = req.params;
+
+  const provaMestre = await prisma.provaMestre.findUnique({ where: { id: provaMestreId } });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
+
+  const aluno = await prisma.aluno.findFirst({ where: { turmaId: provaMestre.turmaId, matricula: token } });
+  if (!aluno) return res.status(404).json({ erro: "Matrícula não encontrada." });
+
+  const ativa = await prisma.provaIndividual.findFirst({
+    where: { provaMestreId, alunoId: aluno.id, status: { not: "finalizada" } },
+    include: { questoes: { include: { questao: true }, orderBy: { ordem: "asc" } } },
+  });
+  if (!ativa) return res.status(404).json({ erro: "Nenhuma tentativa em andamento encontrada." });
+
+  const acertos = ativa.questoes.filter((q) => q.correta === true).length;
+  const total = ativa.questoes.length;
+
+  await prisma.provaIndividual.update({
+    where: { id: ativa.id },
+    data: { status: "finalizada", finalizadaEm: new Date(), acertos, total },
+  });
+
+  const totalTentativas = await prisma.provaIndividual.count({ where: { provaMestreId, alunoId: aluno.id } });
+  const podeTentarDeNovo = ativa.tentativa < 2 && totalTentativas < 2 && !prazoEncerrado(provaMestre);
+  const notaPontos = total ? +((acertos / total) * provaMestre.valor).toFixed(2) : 0;
+
+  res.json({
+    tentativa: ativa.tentativa,
+    acertos,
+    total,
+    percentual: total ? Math.round((acertos / total) * 100) : 0,
+    valor: provaMestre.valor,
+    notaPontos,
+    prazoFinal: provaMestre.prazoFinal,
+    podeTentarDeNovo,
+    detalhe: ativa.questoes.map((q) => ({
+      tema: `${q.questao.disciplina} — ${q.questao.assunto}`,
+      enunciado: q.enunciadoFinal,
+      formatoResposta: q.questao.formatoResposta,
+      alternativas: (q.alternativasFinal as any[]).map((a) => ({ letra: a.letra, campos: a.campos })),
+      respostaAlunoLetra: q.respostaAlunoLetra,
+      respostaCorretaLetra: q.respostaCorretaLetra,
+      correta: q.correta,
+    })),
+  });
 }));
