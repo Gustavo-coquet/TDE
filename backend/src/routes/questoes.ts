@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../db";
 import { Rng, hashSeed } from "../rng";
-import { resolverEtapas, montarEnunciado, gerarAlternativasMulti, VariavelDb, EtapaDb } from "../randomizacao";
+import { resolverEtapas, montarEnunciado, gerarAlternativasParaQuestao, VariavelDb, EtapaDb } from "../randomizacao";
 import { asyncHandler } from "../asyncHandler";
 
 export const questoesRouter = Router();
@@ -11,7 +11,7 @@ function preview(enunciadoTemplate: string, variaveis: VariavelDb[], etapas: Eta
   const valores = resolverEtapas(variaveis, etapas, rng);
   const enunciado = montarEnunciado(enunciadoTemplate, valores);
   const saidas = etapas.filter((e) => e.saida).map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] }));
-  const alternativas = gerarAlternativasMulti(saidas, rng);
+  const alternativas = gerarAlternativasParaQuestao(etapas, valores, rng);
   return { enunciado, saidas, alternativas };
 }
 
