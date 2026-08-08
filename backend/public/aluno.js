@@ -9,6 +9,12 @@ function formatarBR(n) {
   return String(Number(n)).replace(".", ","); // só vírgula decimal, sem separador de milhar
 }
 
+// campos de etapas de texto (ex.: "1º quadrante", vindo de um se(...)) devem aparecer do jeito
+// que estão, sem tentar formatar como número
+function formatarValorCampo(valor) {
+  return typeof valor === "string" ? valor : formatarBR(valor);
+}
+
 // monta o texto de uma alternativa; se a questão tiver um "formatoResposta" customizado
 // (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele SÓ pros campos que ele referencia — outros campos
 // marcados como "é resposta" que não aparecem no formato continuam mostrados do jeito padrão, do lado.
@@ -18,15 +24,15 @@ function textoAlternativa(campos, formato) {
     const usados = new Set();
     campos.forEach((c) => {
       if (out.includes(`{${c.nome}}`)) {
-        out = out.split(`{${c.nome}}`).join(formatarBR(c.valor));
+        out = out.split(`{${c.nome}}`).join(formatarValorCampo(c.valor));
         usados.add(c.nome);
       }
     });
     const restantes = campos.filter((c) => !usados.has(c.nome));
-    const textoRestante = restantes.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
+    const textoRestante = restantes.map((c) => `${c.nome} = ${formatarValorCampo(c.valor)} ${c.unidade}`).join("   |   ");
     return textoRestante ? `${out}   |   ${textoRestante}` : out;
   }
-  return campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
+  return campos.map((c) => `${c.nome} = ${formatarValorCampo(c.valor)} ${c.unidade}`).join("   |   ");
 }
 
 async function api(path, options) {
