@@ -11,6 +11,7 @@ function mapQuestoes(questoes: any[]) {
     tema: `${q.questao.disciplina} — ${q.questao.assunto}`,
     enunciado: q.enunciadoFinal,
     imagem: q.questao.imagem,
+    formatoResposta: q.questao.formatoResposta,
     respostaAlunoLetra: q.respostaAlunoLetra,
     alternativas: (q.alternativasFinal as any[]).map((a) => ({ letra: a.letra, campos: a.campos })), // sem "correta"
   }));
@@ -213,6 +214,7 @@ alunoExamRouter.post("/:provaMestreId/:token/finalizar", asyncHandler(async (req
     detalhe: ativa.questoes.map((q) => ({
       tema: `${q.questao.disciplina} — ${q.questao.assunto}`,
       enunciado: q.enunciadoFinal,
+      formatoResposta: q.questao.formatoResposta,
       alternativas: (q.alternativasFinal as any[]).map((a) => ({ letra: a.letra, campos: a.campos })),
       respostaAlunoLetra: q.respostaAlunoLetra,
       respostaCorretaLetra: q.respostaCorretaLetra,
