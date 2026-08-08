@@ -101,6 +101,12 @@ function formatarBR(n) {
   return String(Number(n)).replace(".", ","); // só vírgula decimal, sem separador de milhar
 }
 
+// campos de etapas de texto (ex.: "1º quadrante", vindo de um se(...)) devem aparecer do jeito
+// que estão, sem tentar formatar como número
+function formatarValorCampo(valor) {
+  return typeof valor === "string" ? valor : formatarBR(valor);
+}
+
 async function api(path, options) {
   const res = await fetch(`/api${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -572,15 +578,15 @@ function textoAlternativa(campos, formato) {
     const usados = new Set();
     campos.forEach((c) => {
       if (out.includes(`{${c.nome}}`)) {
-        out = out.split(`{${c.nome}}`).join(formatarBR(c.valor));
+        out = out.split(`{${c.nome}}`).join(formatarValorCampo(c.valor));
         usados.add(c.nome);
       }
     });
     const restantes = campos.filter((c) => !usados.has(c.nome));
-    const textoRestante = restantes.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
+    const textoRestante = restantes.map((c) => `${c.nome} = ${formatarValorCampo(c.valor)} ${c.unidade}`).join("   |   ");
     return textoRestante ? `${out}   |   ${textoRestante}` : out;
   }
-  return campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
+  return campos.map((c) => `${c.nome} = ${formatarValorCampo(c.valor)} ${c.unidade}`).join("   |   ");
 }
 
 function renderAlternativasPreview(alternativas, formato) {
@@ -643,7 +649,9 @@ function renderFormNovaQuestao(container) {
           Fórmulas aceitam: <code>+ - * / ^</code>, funções <code>sin cos tan sqrt abs ln log</code> (ângulos em graus),
           <code>atan2(y;x)</code> (ângulo já certo em qualquer quadrante), <code>min(a;b)</code>, <code>max(a;b)</code>,
           e condição <code>se(condição;se_verdadeiro;se_falso)</code> — ex.: <code>se(x>0;x;-x)</code>.
-          Separe argumentos de função com <b>ponto-e-vírgula</b> (;), não vírgula — a vírgula já é o separador decimal.
+          Separe argumentos de função com <b>ponto-e-vírgula</b> (;), não vírgula — a vírgula já é o separador decimal.<br>
+          O <code>se()</code> também pode devolver <b>texto</b> entre aspas, ex.: <code>se(Rx>=0;se(Ry>=0;"1º quadrante";"4º quadrante");se(Ry>=0;"2º quadrante";"3º quadrante"))</code>
+          — o texto sempre fica coerente com os números daquela alternativa, mesmo nas erradas.
         </div>
         <div id="nq-etapas"></div>
         <button class="btn subtle" id="nq-add-etapa" type="button">+ Adicionar etapa</button>
