@@ -10,12 +10,21 @@ function formatarBR(n) {
 }
 
 // monta o texto de uma alternativa; se a questão tiver um "formatoResposta" customizado
-// (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele em vez de listar campo por campo
+// (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele SÓ pros campos que ele referencia — outros campos
+// marcados como "é resposta" que não aparecem no formato continuam mostrados do jeito padrão, do lado.
 function textoAlternativa(campos, formato) {
   if (formato) {
     let out = formato;
-    campos.forEach((c) => { out = out.split(`{${c.nome}}`).join(formatarBR(c.valor)); });
-    return out;
+    const usados = new Set();
+    campos.forEach((c) => {
+      if (out.includes(`{${c.nome}}`)) {
+        out = out.split(`{${c.nome}}`).join(formatarBR(c.valor));
+        usados.add(c.nome);
+      }
+    });
+    const restantes = campos.filter((c) => !usados.has(c.nome));
+    const textoRestante = restantes.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
+    return textoRestante ? `${out}   |   ${textoRestante}` : out;
   }
   return campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
 }
