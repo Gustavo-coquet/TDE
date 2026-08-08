@@ -36,6 +36,7 @@ model Questao {
   enunciado    String                        // template com placeholders {NOME}
   variaveis    Json                           // [{ nome, min, max, decimais }] — entradas sorteadas
   etapas       Json                           // [{ nome, formula, decimais, unidade, saida }] — em ordem; cada uma pode usar variaveis + etapas anteriores
+  formatoResposta String?                     // opcional: molde de como exibir a alternativa, ex.: "F = ({Fx}î + {Fz}k̂) N"
   imagem       String?                        // imagem opcional (esquema/desenho), guardada como data URL base64
   criadoEm     DateTime @default(now())
 
