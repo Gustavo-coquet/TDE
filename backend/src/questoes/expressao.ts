@@ -22,6 +22,11 @@ function paraNumero(v: Valor, contexto: string): number {
   return v;
 }
 
+// converte um valor pra texto na hora de concatenar com "+" — número vira texto no padrão BR (vírgula decimal)
+function paraTexto(v: Valor): string {
+  return ehTexto(v) ? v : String(v).replace(".", ",");
+}
+
 function chamarFuncao(nome: string, args: Valor[]): Valor {
   const key = nome.toLowerCase();
   if (key === "se") return args[0] !== 0 ? args[1] : args[2]; // se(condicao, valorSeVerdadeiro, valorSeFalso) — aceita texto
@@ -155,8 +160,12 @@ export function avaliarExpressao(expr: string, vars: Record<string, Valor>): Val
     while (peek() === "+" || peek() === "-") {
       const op = s[i]; i++;
       const r = parseTerm();
-      const a = paraNumero(v, "soma/subtração"), b = paraNumero(r, "soma/subtração");
-      v = op === "+" ? a + b : a - b;
+      if (op === "+" && (ehTexto(v) || ehTexto(r))) {
+        v = paraTexto(v) + paraTexto(r); // "+" com texto de qualquer lado vira concatenação, ex.: theta + "° (anti-horário)"
+      } else {
+        const a = paraNumero(v, "soma/subtração"), b = paraNumero(r, "soma/subtração");
+        v = op === "+" ? a + b : a - b;
+      }
     }
     return v;
   }
