@@ -9,6 +9,17 @@ function formatarBR(n) {
   return String(Number(n)).replace(".", ","); // só vírgula decimal, sem separador de milhar
 }
 
+// monta o texto de uma alternativa; se a questão tiver um "formatoResposta" customizado
+// (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele em vez de listar campo por campo
+function textoAlternativa(campos, formato) {
+  if (formato) {
+    let out = formato;
+    campos.forEach((c) => { out = out.split(`{${c.nome}}`).join(formatarBR(c.valor)); });
+    return out;
+  }
+  return campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
+}
+
 async function api(path, options) {
   const res = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
   if (!res.ok) {
@@ -174,7 +185,7 @@ function renderProva() {
         ${q.alternativas.map((a) => `
           <div class="option ${state.respostas[q.id]===a.letra?'selected':''}" data-letra="${a.letra}">
             <div class="option-letter">${a.letra}</div>
-            <span class="mono" style="font-size:14px;">${a.campos.map(c => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ")}</span>
+            <span class="mono" style="font-size:14px;">${textoAlternativa(a.campos, q.formatoResposta)}</span>
           </div>
         `).join("")}
       </div>
@@ -348,7 +359,7 @@ function gerarPDF(r) {
       const correta = a.letra === d.respostaCorretaLetra;
       const marcador = escolhida ? "[X]" : "[ ]";
       const rotulo = correta ? " (RESPOSTA CORRETA)" : "";
-      const texto = `${marcador} ${a.letra}) ${a.campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("  |  ")}${rotulo}`;
+      const texto = `${marcador} ${a.letra}) ${textoAlternativa(a.campos, d.formatoResposta)}${rotulo}`;
       escreverParagrafo(texto, 9.5, correta || escolhida);
     });
     y += 4;
