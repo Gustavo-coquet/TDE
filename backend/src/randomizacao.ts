@@ -1,5 +1,5 @@
 import { Rng, hashSeed } from "./rng";
-import { avaliarExpressao } from "./questoes/expressao";
+import { avaliarExpressao, Valor } from "./questoes/expressao";
 
 export interface VariavelDb {
   nome: string;
@@ -9,10 +9,10 @@ export interface VariavelDb {
 }
 
 export interface EtapaDb {
-  nome: string;       // nome da grandeza calculada nesta etapa (ex.: "I", "sigma", "F")
-  formula: string;    // pode usar variaveis de entrada E nomes de etapas anteriores
-  decimais: number;
-  unidade: string;
+  nome: string;       // nome da grandeza calculada nesta etapa (ex.: "I", "sigma", "quadrante")
+  formula: string;    // pode usar variaveis de entrada E nomes de etapas anteriores; pode devolver número OU texto
+  decimais: number;   // ignorado se a etapa devolver texto
+  unidade: string;    // pode ficar vazio pra etapas de texto
   saida: boolean;     // true = esta etapa aparece como uma das respostas mostradas ao aluno
 }
 
@@ -26,7 +26,7 @@ export interface QuestaoDb {
 export interface CampoAlternativa {
   nome: string;
   unidade: string;
-  valor: number;
+  valor: Valor; // número (caso normal) ou texto (quando a etapa usa se(...;"texto";"texto"))
 }
 
 export interface AlternativaGerada {
@@ -38,7 +38,7 @@ export interface AlternativaGerada {
 export interface QuestaoIndividualGerada {
   questaoId: string;
   ordem: number;
-  parametrosGerados: Record<string, number>;
+  parametrosGerados: Record<string, Valor>;
   enunciadoFinal: string;
   alternativasFinal: AlternativaGerada[];
   respostaCorretaLetra: string;
@@ -67,12 +67,7 @@ export function gerarProvaIndividual(
   const questoesGeradas: QuestaoIndividualGerada[] = ordemEmbaralhada.map((q, idx) => {
     const valores = resolverEtapas(q.variaveis, q.etapas, rng);
     const enunciadoFinal = montarEnunciado(q.enunciado, valores);
-
-    const saidas = q.etapas
-      .filter((e) => e.saida)
-      .map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] }));
-
-    const alternativas = gerarAlternativasMulti(saidas, rng);
+    const alternativas = gerarAlternativasParaQuestao(q.etapas, valores, rng);
 
     return {
       questaoId: q.id,
@@ -88,11 +83,11 @@ export function gerarProvaIndividual(
 }
 
 /** Sorteia as variáveis de entrada e resolve cada etapa em ordem, podendo usar tudo que veio antes. */
-export function resolverEtapas(variaveis: VariavelDb[], etapas: EtapaDb[], rng: Rng): Record<string, number> {
-  const valores = gerarValores(variaveis, rng);
+export function resolverEtapas(variaveis: VariavelDb[], etapas: EtapaDb[], rng: Rng): Record<string, Valor> {
+  const valores: Record<string, Valor> = gerarValores(variaveis, rng);
   for (const etapa of etapas) {
     const bruto = avaliarExpressao(etapa.formula, valores);
-    valores[etapa.nome] = roundTo(bruto, etapa.decimais);
+    valores[etapa.nome] = typeof bruto === "number" ? roundTo(bruto, etapa.decimais) : bruto;
   }
   return valores;
 }
@@ -109,16 +104,66 @@ export function formatarNumeroBR(n: number): string {
   return String(n).replace(".", ","); // só troca o ponto decimal por vírgula, sem separador de milhar
 }
 
-export function montarEnunciado(template: string, valores: Record<string, number>): string {
+export function montarEnunciado(template: string, valores: Record<string, Valor>): string {
   let out = template;
   for (const [k, v] of Object.entries(valores)) {
-    out = out.split(`{${k}}`).join(formatarNumeroBR(v));
+    out = out.split(`{${k}}`).join(typeof v === "number" ? formatarNumeroBR(v) : v);
   }
   return out;
 }
 
 /**
- * Gera alternativas quando a "resposta" é composta por mais de um campo
+ * Monta as alternativas de uma questão a partir das etapas marcadas como "saída".
+ *
+ * Etapas NUMÉRICAS (o caso normal) são sorteadas de forma independente pra criar
+ * as opções erradas — cada uma ganha valores plausivelmente errados.
+ *
+ * Etapas de TEXTO (resultado de um se(...;"texto";"texto")) são especiais: em vez de
+ * sortear um texto qualquer, o sistema RECALCULA a fórmula pra cada alternativa usando
+ * os números daquela alternativa específica. Isso garante que o texto sempre bate com
+ * os números mostrados do lado — inclusive nas alternativas erradas (ex.: se "Rx" e "Ry"
+ * de uma opção errada são os dois positivos, o texto "1º quadrante" dessa mesma opção
+ * é recalculado e fica coerente, em vez de vir de um sorteio independente que poderia
+ * mostrar "1º quadrante" ao lado de números que não batem com isso).
+ */
+export function gerarAlternativasParaQuestao(
+  etapas: EtapaDb[],
+  valores: Record<string, Valor>,
+  rng: Rng
+): AlternativaGerada[] {
+  const etapasSaida = etapas.filter((e) => e.saida);
+  const saidasNumericas = etapasSaida
+    .filter((e) => typeof valores[e.nome] === "number")
+    .map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] as number }));
+  const etapasTexto = etapasSaida.filter((e) => typeof valores[e.nome] === "string");
+
+  const alternativas = gerarAlternativasMulti(saidasNumericas, rng);
+
+  if (etapasTexto.length > 0) {
+    for (const alt of alternativas) {
+      // recria o "contexto" dessa alternativa: os mesmos valores de sempre, mas com os
+      // campos numéricos trocados pelos valores (certos ou errados) DESSA alternativa
+      const contexto: Record<string, Valor> = { ...valores };
+      for (const campo of alt.campos) contexto[campo.nome] = campo.valor;
+
+      for (const et of etapasTexto) {
+        let texto: string;
+        try {
+          const recalculado = avaliarExpressao(et.formula, contexto);
+          texto = String(recalculado);
+        } catch {
+          texto = String(valores[et.nome]); // fallback: não deveria acontecer, mas evita quebrar a prova
+        }
+        alt.campos.push({ nome: et.nome, unidade: et.unidade, valor: texto });
+      }
+    }
+  }
+
+  return alternativas;
+}
+
+/**
+ * Gera alternativas quando a "resposta" é composta por mais de um campo NUMÉRICO
  * (ex.: F=30 N e P=60 Pa no mesmo item). Cada campo recebe seu próprio conjunto
  * de valores plausivelmente errados; as alternativas erradas misturam campos
  * certos e errados, então um aluno que acerta só uma etapa não acerta a questão.
@@ -170,7 +215,7 @@ export function gerarAlternativasMulti(
   }
 
   const arr = tuplas.map((tupla) => ({
-    campos: saidas.map((s, i) => ({ nome: s.nome, unidade: s.unidade, valor: tupla[i] })),
+    campos: saidas.map((s, i) => ({ nome: s.nome, unidade: s.unidade, valor: tupla[i] as Valor })),
     correta: tupla.every((v, i) => v === tuplaCorreta[i]),
   }));
 
