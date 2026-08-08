@@ -533,7 +533,7 @@ async function renderBanco(mostrarForm) {
           <div style="font-size:13.5px; margin-top:10px; line-height:1.6;">${q.preview.enunciado}</div>
           ${q.preview.erro
             ? `<div class="mono" style="color:var(--red); font-size:12px; margin-top:10px;">Erro: ${q.preview.erro}</div>`
-            : `<div style="margin-top:12px;">${renderAlternativasPreview(q.preview.alternativas)}</div>`}
+            : `<div style="margin-top:12px;">${renderAlternativasPreview(q.preview.alternativas, q.formatoResposta)}</div>`}
           <div class="divider mono muted" style="font-size:11px;">Cada aluno recebe outros valores dentro das mesmas faixas — mesmo raciocínio, mesma dificuldade.</div>
           <div style="margin-top:12px; display:flex; gap:8px;">
             <button class="btn subtle" data-editar="${q.id}">Editar questão</button>
@@ -543,7 +543,7 @@ async function renderBanco(mostrarForm) {
       `;
       document.querySelector("[data-editar]")?.addEventListener("click", () => {
         state.editandoQuestaoId = q.id;
-        state.editandoQuestaoDados = { disciplina: q.disciplina, assunto: q.assunto, dificuldade: q.dificuldade, enunciado: q.enunciado };
+        state.editandoQuestaoDados = { disciplina: q.disciplina, assunto: q.assunto, dificuldade: q.dificuldade, enunciado: q.enunciado, formatoResposta: q.formatoResposta };
         state.novaQuestaoVars = JSON.parse(JSON.stringify(q.variaveis));
         state.novaQuestaoEtapas = JSON.parse(JSON.stringify(q.etapas));
         state.novaQuestaoImagem = q.imagem || null;
@@ -563,15 +563,21 @@ async function renderBanco(mostrarForm) {
 }
 
 // monta o texto de uma alternativa combinando todos os campos (ex.: "I=29947.5 cm⁴, σ=0.145 kN/cm²")
-function textoAlternativa(campos) {
+// se "formato" for informado (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele pra montar uma expressão única em vez de listar campo por campo
+function textoAlternativa(campos, formato) {
+  if (formato) {
+    let out = formato;
+    campos.forEach((c) => { out = out.split(`{${c.nome}}`).join(formatarBR(c.valor)); });
+    return out;
+  }
   return campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
 }
 
-function renderAlternativasPreview(alternativas) {
+function renderAlternativasPreview(alternativas, formato) {
   return `<div style="display:flex; flex-direction:column; gap:6px;">
     ${alternativas.map((a) => `
       <div class="mono" style="font-size:12px; padding:6px 8px; ${a.correta ? 'background:rgba(127,216,143,.1); color:var(--green); border:1px solid #3E6B45;' : 'color:var(--ink-muted); border:1px solid var(--line-faint);'}">
-        ${a.letra}) ${textoAlternativa(a.campos)} ${a.correta ? "← correta" : ""}
+        ${a.letra}) ${textoAlternativa(a.campos, formato)} ${a.correta ? "← correta" : ""}
       </div>
     `).join("")}
   </div>`;
@@ -579,7 +585,7 @@ function renderAlternativasPreview(alternativas) {
 
 function renderFormNovaQuestao(container) {
   const editando = !!state.editandoQuestaoId;
-  const dados = state.editandoQuestaoDados || { disciplina: "", assunto: "", dificuldade: 2, enunciado: "" };
+  const dados = state.editandoQuestaoDados || { disciplina: "", assunto: "", dificuldade: 2, enunciado: "", formatoResposta: "" };
   const disciplinasExistentes = disciplinasDe(state.questoes || []);
   const assuntosExistentes = assuntosDe(state.questoes || [], "");
   container.innerHTML = `
@@ -610,7 +616,7 @@ function renderFormNovaQuestao(container) {
         <div id="nq-imagem-preview" style="margin-top:8px;"></div>
       </div>
       <div class="field">
-        <label>Letras gregas — clique num campo de texto abaixo e depois na letra pra inserir</label>
+        <label>Letras gregas e símbolos (î, ĵ, k̂, °, ±...) — clique num campo de texto abaixo e depois no símbolo pra inserir</label>
         <div id="paleta-grega" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
       </div>
 
@@ -625,6 +631,12 @@ function renderFormNovaQuestao(container) {
         <div class="hint" style="margin-bottom:8px;">Marque "é resposta" nas etapas que devem aparecer nas alternativas pro aluno responder. Pode marcar mais de uma (ex.: I e σ na mesma questão).</div>
         <div id="nq-etapas"></div>
         <button class="btn subtle" id="nq-add-etapa" type="button">+ Adicionar etapa</button>
+      </div>
+
+      <div class="field">
+        <label>Formato customizado da resposta (opcional — pra vetores, notação especial, etc.)</label>
+        <input id="nq-formato-resposta" value="${dados.formatoResposta || ""}" placeholder="Ex: F = ({Fx}î + {Fz}k̂) N" class="mono" />
+        <div class="hint">Use {NOME} pra referenciar o valor de uma etapa marcada como "é resposta". Se deixar vazio, mostra do jeito padrão: "Fx = 5 N | Fz = 3 N".</div>
       </div>
 
       <div style="display:flex; gap:10px; margin-top:6px;">
@@ -682,7 +694,7 @@ function renderFormNovaQuestao(container) {
     reader.readAsDataURL(file);
   });
 
-  const LETRAS_GREGAS = ["α","β","γ","δ","ε","ζ","η","θ","ι","κ","λ","μ","ν","ξ","ο","π","ρ","σ","τ","υ","φ","χ","ψ","ω","Δ","Σ","Ω","Φ","Ψ","Θ","Λ","Π"];
+  const LETRAS_GREGAS = ["α","β","γ","δ","ε","ζ","η","θ","ι","κ","λ","μ","ν","ξ","ο","π","ρ","σ","τ","υ","φ","χ","ψ","ω","Δ","Σ","Ω","Φ","Ψ","Θ","Λ","Π","î","ĵ","k̂","°","±","√","∞","²","³"];
   document.getElementById("paleta-grega").innerHTML = LETRAS_GREGAS.map((l) =>
     `<button type="button" class="btn subtle" data-letra-grega="${l}" style="padding:5px 10px; font-size:14px; font-family:var(--f-mono);">${l}</button>`
   ).join("");
@@ -780,6 +792,7 @@ function renderFormNovaQuestao(container) {
       variaveis: state.novaQuestaoVars.filter((v) => v.nome),
       etapas: state.novaQuestaoEtapas.filter((et) => et.nome && et.formula),
       imagem: state.novaQuestaoImagem || null,
+      formatoResposta: document.getElementById("nq-formato-resposta").value.trim() || null,
     };
   }
 
@@ -806,7 +819,7 @@ function renderFormNovaQuestao(container) {
       previewEl.innerHTML = `<div class="ok-box">
         ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-bottom:10px; border:1px solid var(--line-faint);" />` : ""}
         <div style="margin-bottom:10px;">${resultado.enunciado}</div>
-        ${renderAlternativasPreview(resultado.alternativas)}
+        ${renderAlternativasPreview(resultado.alternativas, q.formatoResposta)}
       </div>`;
     } catch (e) {
       erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
