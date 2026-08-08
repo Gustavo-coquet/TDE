@@ -638,7 +638,13 @@ function renderFormNovaQuestao(container) {
 
       <div class="field">
         <label>Etapas de cálculo (em ordem — cada uma pode usar as variáveis acima E o resultado de etapas anteriores)</label>
-        <div class="hint" style="margin-bottom:8px;">Marque "é resposta" nas etapas que devem aparecer nas alternativas pro aluno responder. Pode marcar mais de uma (ex.: I e σ na mesma questão).</div>
+        <div class="hint" style="margin-bottom:4px;">Marque "é resposta" nas etapas que devem aparecer nas alternativas pro aluno responder. Pode marcar mais de uma (ex.: I e σ na mesma questão).</div>
+        <div class="hint" style="margin-bottom:8px;">
+          Fórmulas aceitam: <code>+ - * / ^</code>, funções <code>sin cos tan sqrt abs ln log</code> (ângulos em graus),
+          <code>atan2(y;x)</code> (ângulo já certo em qualquer quadrante), <code>min(a;b)</code>, <code>max(a;b)</code>,
+          e condição <code>se(condição;se_verdadeiro;se_falso)</code> — ex.: <code>se(x>0;x;-x)</code>.
+          Separe argumentos de função com <b>ponto-e-vírgula</b> (;), não vírgula — a vírgula já é o separador decimal.
+        </div>
         <div id="nq-etapas"></div>
         <button class="btn subtle" id="nq-add-etapa" type="button">+ Adicionar etapa</button>
       </div>
