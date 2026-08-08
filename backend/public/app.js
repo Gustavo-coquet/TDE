@@ -563,12 +563,22 @@ async function renderBanco(mostrarForm) {
 }
 
 // monta o texto de uma alternativa combinando todos os campos (ex.: "I=29947.5 cm⁴, σ=0.145 kN/cm²")
-// se "formato" for informado (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele pra montar uma expressão única em vez de listar campo por campo
+// se "formato" for informado (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele pra montar uma expressão única
+// SÓ pros campos que ele realmente referencia — outros campos marcados como "é resposta" que não
+// aparecem no formato continuam sendo mostrados do jeito padrão, do lado.
 function textoAlternativa(campos, formato) {
   if (formato) {
     let out = formato;
-    campos.forEach((c) => { out = out.split(`{${c.nome}}`).join(formatarBR(c.valor)); });
-    return out;
+    const usados = new Set();
+    campos.forEach((c) => {
+      if (out.includes(`{${c.nome}}`)) {
+        out = out.split(`{${c.nome}}`).join(formatarBR(c.valor));
+        usados.add(c.nome);
+      }
+    });
+    const restantes = campos.filter((c) => !usados.has(c.nome));
+    const textoRestante = restantes.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
+    return textoRestante ? `${out}   |   ${textoRestante}` : out;
   }
   return campos.map((c) => `${c.nome} = ${formatarBR(c.valor)} ${c.unidade}`).join("   |   ");
 }
