@@ -22,9 +22,13 @@ function paraNumero(v: Valor, contexto: string): number {
   return v;
 }
 
-// converte um valor pra texto na hora de concatenar com "+" — número vira texto no padrão BR (vírgula decimal)
+// converte um valor pra texto na hora de concatenar com "+" — número vira texto no padrão BR (vírgula decimal).
+// arredonda pra 2 casas antes: sem isso, contas como 191,33+180 podem virar "371.33000000000004"
+// por causa de como o computador guarda números decimais (ponto flutuante).
 function paraTexto(v: Valor): string {
-  return ehTexto(v) ? v : String(v).replace(".", ",");
+  if (ehTexto(v)) return v;
+  const arredondado = Math.round(v * 100) / 100;
+  return String(arredondado).replace(".", ",");
 }
 
 function chamarFuncao(nome: string, args: Valor[]): Valor {
