@@ -178,12 +178,15 @@ export function gerarAlternativasMulti(
   const pools = saidas.map((s) => {
     const valores = new Set<number>();
     let tentativas = 0;
+    // se o valor certo é negativo (ângulo, componente de vetor...), aceita distratores negativos também;
+    // se o valor certo é positivo (densidade, força, massa...), não faz sentido gerar um errado negativo
+    const podeSerNegativo = s.valor < 0;
     while (valores.size < TOTAL_ALTERNATIVAS - 1 && tentativas < 150) {
       tentativas++;
       const fator = fatores[rng.int(0, fatores.length - 1)];
       const sinal = rng.int(0, 1) ? 1 : -1;
       const errado = round2(s.valor * fator + sinal * rng.int(1, 5));
-      if (errado !== s.valor && !valores.has(errado)) valores.add(errado); // aceita negativo também (Ry, ângulos, etc. podem ser negativos)
+      if (errado !== s.valor && !valores.has(errado) && (podeSerNegativo || errado > 0)) valores.add(errado);
     }
     return Array.from(valores);
   });
