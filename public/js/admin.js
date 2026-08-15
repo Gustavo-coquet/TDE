@@ -1,35 +1,36 @@
+ JS
 /* Telas do administrador: painel, turmas, professores, geração de salas e exportações. */
-
+ 
 async function viewPainel() {
   const d = await api('/admin/dashboard')
-
+ 
   const metrica = (valor, rotulo) => `
     <div class="cartao cantos metrica"><div class="canto"></div>
       <div class="valor">${valor}</div><div class="rotulo">${rotulo}</div>
     </div>`
-
+ 
   const pendencias = []
   if (d.totais.semProfessor) pendencias.push(`${d.totais.semProfessor} turma(s) sem professor vinculado`)
   if (d.totais.semDia) pendencias.push(`${d.totais.semDia} turma(s) sem dia de prova`)
   if (d.totais.semGabarito) pendencias.push(`${d.totais.semGabarito} turma(s) com gabarito incompleto`)
-
+ 
   el('conteudo').innerHTML = `
     <div class="rotulo-secao">Painel</div>
     <h2 class="titulo">Visão geral do semestre</h2>
-
+ 
     <div class="grade g4" style="margin-bottom:22px">
       ${metrica(d.totais.turmas, 'turmas')}
       ${metrica(d.totais.alunos, 'alunos')}
       ${metrica(d.totais.professores, 'professores')}
       ${metrica(d.totais.disciplinas, 'disciplinas')}
     </div>
-
+ 
     ${
       pendencias.length
         ? `<div class="aviso info"><strong>Pendências antes de gerar as salas:</strong><br />${pendencias.join('<br />')}</div>`
         : '<div class="aviso ok">Tudo preenchido — pode gerar as salas.</div>'
     }
-
+ 
     <div class="cartao cantos" style="margin-bottom:22px"><div class="canto"></div>
       <div class="rotulo-secao" style="margin-bottom:14px">Distribuição por dia e turno</div>
       <table>
@@ -60,7 +61,7 @@ async function viewPainel() {
         </tbody>
       </table>
     </div>
-
+ 
     <div class="cartao cantos"><div class="canto"></div>
       <div class="rotulo-secao" style="margin-bottom:14px">Exportações</div>
       <div class="linha-botoes">
@@ -73,12 +74,12 @@ async function viewPainel() {
       </p>
     </div>`
 }
-
+ 
 /* ---------------------------------- turmas ---------------------------------- */
-
+ 
 async function viewAdminTurmas() {
   const { turmas } = await api('/turmas')
-
+ 
   el('conteudo').innerHTML = `
     <div class="rotulo-secao">Turmas</div>
     <h2 class="titulo">${turmas.length} turma${turmas.length === 1 ? '' : 's'} cadastrada${turmas.length === 1 ? '' : 's'}</h2>
@@ -86,7 +87,7 @@ async function viewAdminTurmas() {
       As turmas nascem quando um professor escolhe as disciplinas dele — em
       <em>Cadastro em lote</em> você faz isso por ele, se precisar.
     </p>
-
+ 
     ${
       turmas.length
         ? `<div class="cartao cantos"><div class="canto"></div>
@@ -122,14 +123,14 @@ async function viewAdminTurmas() {
           </div>`
         : '<div class="cartao cantos"><div class="canto"></div><div class="vazio">Nenhuma turma ainda — nenhum professor escolheu disciplinas.</div></div>'
     }`
-
+ 
   document.querySelectorAll('[data-abrir]').forEach((tr) => {
     tr.onclick = (ev) => {
       if (ev.target.dataset.excluir) return
       irPara(`turma/${tr.dataset.abrir}`)
     }
   })
-
+ 
   document.querySelectorAll('[data-excluir]').forEach((b) => {
     b.onclick = async (ev) => {
       ev.stopPropagation()
@@ -140,21 +141,21 @@ async function viewAdminTurmas() {
     }
   })
 }
-
+ 
 /* -------------------------------- ensalamento ------------------------------- */
-
+ 
 let diaSelecionado = 'SEGUNDA'
 let turnoSelecionado = 'NOTURNO'
 let ordenacaoSalas = 'alfabetica'
-
+ 
 async function viewSalas() {
   const painel = await api('/admin/dashboard')
   const info = painel.porDia.find((p) => p.dia === diaSelecionado && p.turno === turnoSelecionado)
-
+ 
   el('conteudo').innerHTML = `
     <div class="rotulo-secao nao-imprime">Ensalamento</div>
     <h2 class="titulo nao-imprime">Gerar salas</h2>
-
+ 
     <div class="cartao cantos nao-imprime" style="margin-bottom:22px"><div class="canto"></div>
       <div class="grade g4" style="margin-bottom:16px">
         <label class="campo" style="margin:0"><span>Dia da prova</span>
@@ -178,19 +179,19 @@ async function viewSalas() {
         Cada turno é ensalado separado, então ninguém do diurno cai numa sala do noturno.
       </p>
     </div>
-
+ 
     <div id="e-resultado"></div>`
-
+ 
   el('e-dia').onchange = () => {
     diaSelecionado = el('e-dia').value
     viewSalas()
   }
-
+ 
   el('e-turno').onchange = () => {
     turnoSelecionado = el('e-turno').value
     viewSalas()
   }
-
+ 
   el('e-gerar').onclick = async () => {
     const alvo = `${ROTULO_DIA[diaSelecionado]} — ${ROTULO_TURNO[turnoSelecionado].toLowerCase()}`
     if (!confirm(`Gerar as salas de ${alvo}? Isso substitui a distribuição anterior desse dia e turno.`)) return
@@ -205,7 +206,7 @@ async function viewSalas() {
       avisar(e.message, 'erro')
     }
   }
-
+ 
   try {
     const r = await api(`/admin/ensalamento/${diaSelecionado}/${turnoSelecionado}`)
     desenhaSalas(r.ensalamento)
@@ -214,11 +215,11 @@ async function viewSalas() {
       '<div class="cartao cantos"><div class="canto"></div><div class="vazio">Nenhuma sala gerada para este dia e turno ainda.</div></div>'
   }
 }
-
+ 
 function desenhaSalas(ensalamento) {
   const alvo = el('e-resultado')
   const porDisciplina = ordenacaoSalas === 'disciplina'
-
+ 
   const salas = ensalamento.salas
     .map((sala) => {
       const lista = porDisciplina ? sala.porDisciplina : sala.alunos
@@ -245,7 +246,7 @@ function desenhaSalas(ensalamento) {
         </div>`
     })
     .join('')
-
+ 
   alvo.innerHTML = `
     <div class="cartao cantos" style="margin-bottom:18px"><div class="canto"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
@@ -265,20 +266,20 @@ function desenhaSalas(ensalamento) {
       </div>
     </div>
     <div class="salas">${salas}</div>`
-
+ 
   el('o-alfa').onclick = () => { ordenacaoSalas = 'alfabetica'; desenhaSalas(ensalamento) }
   el('o-disc').onclick = () => { ordenacaoSalas = 'disciplina'; desenhaSalas(ensalamento) }
 }
-
+ 
 /* ------------------------------ cadastro em lote ----------------------------- */
-
+ 
 async function viewImportar() {
   const { disciplinas } = await api('/admin/disciplinas')
-
+ 
   el('conteudo').innerHTML = `
     <div class="rotulo-secao">Cadastro em lote</div>
     <h2 class="titulo">Cadastrar professores</h2>
-
+ 
     <div class="cartao cantos" style="margin-bottom:22px"><div class="canto"></div>
       <div class="rotulo-secao" style="margin-bottom:6px">Cole a lista</div>
       <p class="pequeno texto-3" style="margin-bottom:10px">
@@ -293,11 +294,11 @@ async function viewImportar() {
         As disciplinas, o dia e o turno ficam para a grade logo abaixo, ou para o
         próprio professor preencher ao entrar.
       </p>
-
+ 
       <textarea id="i-texto" style="min-height:170px" placeholder="Ana Paula Moreira; ana.moreira@soulasalle.com.br
 Ricardo Teixeira; ricardo.teixeira@soulasalle.com.br
 Helena Vasques; helena.vasques@soulasalle.com.br; outrasenha"></textarea>
-
+ 
       <div class="grade g2" style="margin-top:14px">
         <label class="campo" style="margin:0"><span>Senha padrão (quando a coluna vier vazia)</span>
           <input id="i-senha" value="000000" />
@@ -308,11 +309,11 @@ Helena Vasques; helena.vasques@soulasalle.com.br; outrasenha"></textarea>
         </div>
       </div>
     </div>
-
+ 
     <div id="i-resultado"></div>
-
+ 
     <div id="i-grade" style="margin-top:22px"></div>
-
+ 
     <div class="cartao cantos" style="margin-top:22px"><div class="canto"></div>
       <div class="rotulo-secao" style="margin-bottom:10px">Disciplinas cadastradas (${disciplinas.length})</div>
       <div class="grade g3 pequeno texto-2">
@@ -321,11 +322,11 @@ Helena Vasques; helena.vasques@soulasalle.com.br; outrasenha"></textarea>
           .join('')}
       </div>
     </div>`
-
+ 
   async function enviar(modo) {
     const texto = el('i-texto').value
     if (!texto.trim()) return avisar('Cole a lista primeiro.', 'erro')
-
+ 
     try {
       const r = await api('/admin/importar', {
         method: 'POST',
@@ -345,16 +346,16 @@ Helena Vasques; helena.vasques@soulasalle.com.br; outrasenha"></textarea>
       avisar(e.message, 'erro')
     }
   }
-
+ 
   el('i-conferir').onclick = () => enviar('simular')
   el('i-aplicar').onclick = () => {
     if (!confirm('Cadastrar as linhas válidas? As linhas com erro são ignoradas.')) return
     enviar('aplicar')
   }
-
+ 
   await montaGradeAtribuicao('i-grade')
 }
-
+ 
 function desenhaImportacao(r) {
   const marca = (l) => {
     if (l.erro) return `<span class="pill alerta">${esc(l.erro)}</span>`
@@ -362,7 +363,7 @@ function desenhaImportacao(r) {
       ? '<span class="pill ok">cadastrar</span>'
       : '<span class="pill neutro">já existe — mantém a senha atual</span>'
   }
-
+ 
   el('i-resultado').innerHTML = `
     <div class="cartao cantos"><div class="canto"></div>
       <div class="rotulo-secao" style="margin-bottom:6px">
@@ -393,14 +394,14 @@ function desenhaImportacao(r) {
       </table>
     </div>`
 }
-
+ 
 /* Grade opcional: o administrador pode preencher as disciplinas de cada professor,
    cada uma com o seu dia e o seu turno. Nada aqui é obrigatório — o professor faz
    sozinho ao entrar se ninguém preencher por ele. */
 async function montaGradeAtribuicao(alvoId, senhasRecentes = {}) {
   const { professores, disciplinas, maximo } = await api('/admin/atribuicao')
   let abertoId = null
-
+ 
   function resumo(p) {
     if (!p.itens.length) return '<span class="texto-3">nenhuma disciplina</span>'
     return p.itens
@@ -411,7 +412,7 @@ async function montaGradeAtribuicao(alvoId, senhasRecentes = {}) {
       )
       .join('')
   }
-
+ 
   function desenha() {
     el(alvoId).innerHTML = `
       <div class="cartao cantos"><div class="canto"></div>
@@ -457,14 +458,14 @@ async function montaGradeAtribuicao(alvoId, senhasRecentes = {}) {
             : '<div class="vazio">Nenhum professor ainda. Cole a lista acima.</div>'
         }
       </div>`
-
+ 
     document.querySelectorAll('[data-editar]').forEach((b) => {
       b.onclick = () => {
         abertoId = abertoId === b.dataset.editar ? null : b.dataset.editar
         desenha()
       }
     })
-
+ 
     document.querySelectorAll('[data-senha]').forEach((b) => {
       b.onclick = async () => {
         const senha = prompt('Nova senha para este professor (mínimo 6 caracteres):')
@@ -477,7 +478,7 @@ async function montaGradeAtribuicao(alvoId, senhasRecentes = {}) {
         }
       }
     })
-
+ 
     document.querySelectorAll('[data-apagar]').forEach((b) => {
       b.onclick = async () => {
         if (!confirm('Remover este professor? As disciplinas dele ficam sem dono.')) return
@@ -490,7 +491,7 @@ async function montaGradeAtribuicao(alvoId, senhasRecentes = {}) {
         }
       }
     })
-
+ 
     if (abertoId) {
       const p = professores.find((x) => x.id === abertoId)
       editorDisciplinas({
@@ -510,17 +511,17 @@ async function montaGradeAtribuicao(alvoId, senhasRecentes = {}) {
       })
     }
   }
-
+ 
   desenha()
 }
-
+ 
 /* --------------------------------- manutenção -------------------------------- */
-
+ 
 async function viewManutencao() {
   el('conteudo').innerHTML = `
     <div class="rotulo-secao">Manutenção</div>
     <h2 class="titulo">Fim de semestre</h2>
-
+ 
     <div class="cartao cantos" style="max-width:560px"><div class="canto"></div>
       <h3>Apagar todos os alunos</h3>
       <p class="texto-2 pequeno" style="margin-bottom:16px">
@@ -529,7 +530,7 @@ async function viewManutencao() {
       </p>
       <button class="secundaria perigo" id="m-limpar">Apagar alunos de todas as turmas</button>
     </div>
-
+ 
     <div class="cartao cantos" style="max-width:560px;margin-top:22px"><div class="canto"></div>
       <h3>Apagar todos os professores</h3>
       <p class="texto-2 pequeno" style="margin-bottom:10px">
@@ -542,13 +543,13 @@ async function viewManutencao() {
       </p>
       <button class="secundaria perigo" id="m-professores">Apagar todos os professores</button>
     </div>`
-
+ 
   el('m-limpar').onclick = async () => {
     if (prompt('Isso não tem volta. Digite APAGAR para confirmar:') !== 'APAGAR') return
     const r = await api('/admin/limpar-alunos', { method: 'POST', body: { confirmacao: 'APAGAR' } })
     avisar(`${r.removidos} aluno(s) removido(s).`)
   }
-
+ 
   el('m-professores').onclick = async () => {
     if (!confirm('Apagar TODOS os professores e as turmas deles? Isso não tem volta.')) return
     if (prompt('Digite APAGAR para confirmar:') !== 'APAGAR') return
