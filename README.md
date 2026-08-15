@@ -1,145 +1,163 @@
-# Prova-Mestre — MVP funcional
+# Ensalamento — Provas Integradas
 
-MVP real do sistema descrito na especificação: backend em Node.js/TypeScript + PostgreSQL,
-com o algoritmo de **Prova-Mestre** (randomização de ordem, parametrização numérica e
-correção automática) rodando de verdade. O frontend é HTML/CSS/JS puro (sem build step),
-servido pelo próprio backend — então não precisa instalar nada além do Node.
+Substitui a planilha de 67 abas do Google Sheets. Cada professor entra com o próprio
+login, cadastra os alunos da disciplina dele e preenche o gabarito das 10 questões.
+A coordenação clica em **Criar salas** e o sistema cruza tudo: junta todos os alunos
+que fazem prova naquele dia, ordena por nome e distribui em salas equilibradas.
 
-O que este MVP já faz de verdade:
-- Banco de questões parametrizadas (6 questões de exemplo: física, matemática, estatística).
-- Criação de Prova-Mestre selecionando questões do banco.
-- Publicação: gera 1 prova individual por aluno (8 alunos de exemplo), com ordem e valores
-  numéricos diferentes, mas **as mesmas questões e a mesma dificuldade** para todos — cada
-  prova tem um link único.
-- Aluno resolve a prova pelo navegador (timer, navegação entre questões).
-- Correção automática assim que a prova é finalizada.
-- Painel de resultados: média, mediana, desvio padrão, ranking de questões com mais erro.
-
-O que é simplificado em relação à arquitetura completa (para caber num MVP rodável):
-sem autenticação/login, sem geração de questões por IA, sem exportação para Excel/PDF, e a
-parametrização usa fórmulas already-escritas em código (`src/questoes/templates.ts`) em vez
-de um motor simbólico (SymPy) que interpreta fórmulas dinamicamente.
+**Stack:** Node.js + TypeScript + Express + PostgreSQL. Frontend em HTML/CSS/JS puro,
+servido pelo próprio backend — sem build step, sem framework, sem `node_modules` no
+navegador.
 
 ---
 
-## Pré-requisitos
+## O que o sistema faz
 
-- **Node.js 18 ou superior** — https://nodejs.org
-- **Docker** (para rodar o PostgreSQL) — https://www.docker.com/products/docker-desktop
-  - Alternativa: se já tiver um PostgreSQL rodando na sua máquina, não precisa do Docker —
-    só ajuste a `DATABASE_URL` no passo 3.
+**Professor**
+
+- **escolhe sozinho as disciplinas que leciona**, marcando numa lista com busca —
+  o que já é de outro professor aparece bloqueado, com o nome do dono;
+- vê apenas a(s) disciplina(s) vinculada(s) ao usuário dele;
+- define o dia da prova, o curso e o turno (diurno ou noturno);
+- marca se a turma **entra na mistura de salas** — se desmarcar, os alunos continuam
+  no resumo e no gabarito (para o leitor de cartão-resposta), mas fazem a prova na
+  própria sala;
+- cola a lista de alunos direto da planilha (matrícula + nome, separados por tabulação,
+  ponto e vírgula ou espaço);
+- preenche o gabarito das 10 questões clicando em A/B/C/D/E.
+
+**Administrador**
+
+- cadastra os professores **em lote**, colando uma lista `NOME ; E-MAIL ; SENHA`
+  (a senha é opcional) — com botão de *Conferir* antes de gravar;
+- se quiser, preenche as disciplinas **pelo** professor numa grade, cada uma com o seu
+  dia e turno (até 10 por professor) — opcional, quem não for preenchido faz sozinho;
+- redefine senha e remove professor pela mesma grade;
+- acompanha no painel o que ainda falta: turma sem dia, sem professor, sem gabarito;
+- gera as salas de um dia com um clique, escolhendo a lotação máxima;
+- vê cada sala nas duas ordens — **alfabética** e **por disciplina** — com o resumo de
+  quantos alunos de cada disciplina caíram ali;
+- imprime as listas ou exporta em CSV;
+- exporta o **resumo geral** no mesmo formato que a planilha gerava:
+  `CURSO · DISCIPLINA · PROFESSOR · RA · CODIGO DE BARRAS · NOME · TURNO`.
+
+### Como as salas são montadas
+
+A unidade de ensalamento é **dia + turno**: o diurno de terça e o noturno de terça são
+gerados separadamente e nunca se misturam. Dentro de cada combinação, todos os alunos
+das turmas marcadas como "na mistura" entram numa única lista ordenada por nome
+(ignorando acentos e maiúsculas). O sistema calcula o menor número de salas que respeita
+a lotação e distribui em fatias sequenciais, deixando as salas com no máximo 1 aluno de
+diferença entre si.
+
+> 205 alunos com lotação 15 → 14 salas: 9 com 15 alunos e 5 com 14.
+
+Como a lista está em ordem alfabética, os alunos de disciplinas diferentes se misturam
+naturalmente dentro de cada sala — que é exatamente o efeito desejado na prova.
 
 ---
 
-## Como rodar (passo a passo)
+## Rodando na sua máquina
 
-### 1. Suba o banco de dados PostgreSQL
-
-Na raiz do projeto:
+Precisa de **Node.js 18+**. Para o banco, use o Docker que já vem configurado ou um
+PostgreSQL que você já tenha.
 
 ```bash
+# 1. banco de dados
 docker compose up -d
-```
 
-Isso sobe um Postgres em `localhost:5432` com usuário/senha `prova_mestre`/`prova_mestre`.
-
-### 2. Instale as dependências do backend
-
-```bash
-cd backend
+# 2. dependências
 npm install
-```
 
-### 3. Configure as variáveis de ambiente
-
-```bash
+# 3. variáveis de ambiente
 cp .env.example .env
-```
+#    edite ADMIN_EMAIL e ADMIN_SENHA — é a conta da coordenação
 
-O `.env.example` já vem apontando para o Postgres do Docker Compose — não precisa editar
-nada se você usou o passo 1.
-
-### 4. Rode as migrations (cria as tabelas no banco)
-
-```bash
-npx prisma migrate dev --name init
-```
-
-### 5. Popule o banco com dados de exemplo (questões + turma de 8 alunos)
-
-```bash
+# 4. cria as tabelas e as 60 disciplinas
 npm run seed
-```
 
-### 6. Inicie o servidor
-
-```bash
+# 5. sobe o servidor
 npm run dev
 ```
 
-Você verá:
+Abra <http://localhost:3333> e entre com o e-mail e a senha que você pôs no `.env`.
 
-```
-Prova-Mestre backend rodando em http://localhost:3333
-```
+### Primeiros passos dentro do sistema
 
-### 7. Abra no navegador
-
-**Área do professor:** http://localhost:3333
-
-1. Vá em **"Criar Prova-Mestre"**, selecione algumas questões e clique em publicar.
-2. Isso gera uma prova individual para cada um dos 8 alunos, cada uma com um link único
-   (`/aluno.html?token=...`).
-3. Abra um desses links em outra aba — é exatamente o que o aluno veria — e resolva a prova.
-4. Volte para **"Resultados"** no painel do professor para ver a nota, estatísticas da
-   turma e o ranking de questões com mais erro.
+1. **Professores** → cadastre cada professor com uma senha inicial.
+2. **Turmas** → crie a turma ligando disciplina + professor (+ dia, se já souber).
+3. Passe o link e a senha para cada professor preencher a parte dele.
+4. **Painel** → confira se sumiram as pendências.
+5. **Gerar salas** → escolha o dia, a lotação e clique em *Criar salas*.
 
 ---
 
-## Estrutura do projeto
+## Colocando no ar
 
-```
-prova-mestre-mvp/
-├── docker-compose.yml        # Postgres
-└── backend/
-    ├── prisma/
-    │   ├── schema.prisma      # modelagem do banco (questões, provas, respostas)
-    │   └── seed.ts            # popula banco de questões + alunos de exemplo
-    ├── src/
-    │   ├── rng.ts              # gerador determinístico (seed -> mesma sequência)
-    │   ├── randomizacao.ts     # motor de geração da prova individual
-    │   ├── questoes/
-    │   │   └── templates.ts    # as questões parametrizadas (fórmulas + faixas de valores)
-    │   ├── routes/
-    │   │   ├── questoes.ts
-    │   │   ├── provas.ts       # criar / publicar / resultados da Prova-Mestre
-    │   │   └── alunoExam.ts    # acessar / responder / finalizar a prova do aluno
-    │   ├── db.ts
-    │   └── index.ts            # servidor Express (API + arquivos estáticos)
-    └── public/                 # frontend (HTML/CSS/JS puro, sem build)
-        ├── index.html + app.js     # área do professor
-        └── aluno.html + aluno.js   # área do aluno
-```
+Roteiro completo em `DEPLOY.md`. Resumo: banco no **Neon** (gratuito, não expira),
+site no **Render** (plano free). O sistema cria as tabelas, as 60 disciplinas e a conta
+de coordenação sozinho no primeiro boot, a partir das variáveis de ambiente — não é
+preciso rodar nenhum comando no servidor (o plano free do Render não tem shell).
+
+| Variável | Para quê |
+| --- | --- |
+| `DATABASE_URL` | connection string do Neon |
+| `JWT_SECRET` | assina os cookies de sessão (qualquer string longa) |
+| `ADMIN_EMAIL` | vira a conta de coordenação |
+| `ADMIN_SENHA` | senha inicial dessa conta |
+| `ADMIN_NOME` | nome exibido no topo |
+| `NODE_ENV` | `production` |
+
+Depois do primeiro acesso, troque a senha pela tela. Um redeploy **não** volta a senha
+antiga — só se você definir `FORCAR_SENHA_ADMIN=1`, útil se algum dia perder o acesso.
+
+### Sobre o plano gratuito do Render
+
+O serviço hiberna depois de 15 minutos sem acesso — a primeira pessoa a abrir depois
+disso espera cerca de 1 minuto. Para professores preenchendo dados ao longo da semana
+isso é tranquilo; se incomodar, o plano pago mantém o serviço sempre ligado.
 
 ---
 
-## Comandos úteis
+## Estrutura
+
+```
+ensalamento/
+├── docker-compose.yml       # Postgres para desenvolvimento
+├── render.yaml              # configuração de deploy
+├── src/
+│   ├── index.ts             # servidor Express
+│   ├── seed.ts              # cria admin + as 60 disciplinas
+│   ├── lib/
+│   │   ├── db.ts            # pool de conexões e helpers de SQL
+│   │   ├── migracoes.ts     # cria o schema (roda sozinho no boot)
+│   │   ├── auth.ts          # login por cookie e controle de acesso
+│   │   ├── ensalamento.ts   # o algoritmo de distribuição em salas
+│   │   ├── texto.ts         # normalização de nomes e gabarito
+│   │   └── csv.ts           # exportação
+│   └── routes/
+│       ├── auth.ts          # login, logout, troca de senha
+│       ├── turmas.ts        # o que o professor preenche
+│       └── admin.ts         # coordenação, geração de salas, exportações
+└── public/                  # frontend (sem build)
+    ├── index.html
+    ├── estilo.css
+    └── js/{comum,professor,admin,app}.js
+```
+
+## Comandos
 
 | Comando | O que faz |
-|---|---|
-| `npx prisma studio` | Abre uma interface visual para inspecionar o banco de dados |
-| `npm run seed` | Reseta e repopula o banco com os dados de exemplo |
-| `npx prisma migrate reset` | Apaga o banco e roda as migrations do zero |
-
----
+| --- | --- |
+| `npm run dev` | servidor com recarga automática |
+| `npm run seed` | cria/atualiza o admin e as 60 disciplinas |
+| `npm run build` | compila o TypeScript para `dist/` |
+| `npm start` | roda a versão compilada (usado no Render) |
 
 ## Próximos passos naturais
 
-- Adicionar CRUD de questões pela interface (hoje o banco é populado só pelo seed).
-- Trocar as fórmulas fixas em `templates.ts` por um motor de expressões dinâmico
-  (ex.: mathjs no Node, ou um microsserviço em Python com SymPy) para permitir que o
-  professor escreva questões parametrizadas sem editar código.
-- Autenticação (professor/aluno) e turmas reais em vez da lista fixa de 8 alunos.
-- Exportação de resultados em Excel/CSV/PDF.
-- Deploy: backend em um serviço tipo Railway/Render, banco em Postgres gerenciado
-  (Neon, Supabase, RDS).
+- Importar a planilha atual de uma vez, em vez de cada professor recolar a lista.
+- Ler o arquivo do leitor de cartão-resposta e cruzar com o gabarito para gerar as notas
+  e as estatísticas por questão.
+- Etiquetas/PDF por sala para colar na porta no dia da prova.
+- Registro de quem alterou o quê, para auditar mudanças de última hora.
