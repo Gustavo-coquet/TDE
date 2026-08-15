@@ -560,4 +560,4 @@ async function viewManutencao() {
       avisar(e.message, 'erro')
     }
   }
-}
+}  
