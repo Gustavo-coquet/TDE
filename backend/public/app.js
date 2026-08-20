@@ -285,14 +285,12 @@ async function renderTurmaDetalhe() {
             <div class="row" style="margin-top:6px;">
               <span class="muted" style="font-size:11.5px;">${p.totalQuestoes} questões · vale ${p.valor} pts · ${p.totalAlunos} alunos${p.prazoFinal ? ` · prazo até ${new Date(p.prazoFinal).toLocaleDateString("pt-BR")}` : ""}</span>
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-prazo-tde="${p.id}" data-prazo-atual="${p.prazoFinal || ""}">Editar prazo</button>
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-add-alunos-tde="${p.id}">+ Alunos novos</button>` : ""}
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-links-tde="${p.id}">Ver links</button>` : ""}
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-resultado-tde="${p.id}">Resultados</button>` : ""}
                 <button class="btn danger" style="font-size:11px; padding:4px 8px;" data-apagar-tde="${p.id}">Apagar</button>
               </div>
             </div>
-            <div id="prazo-tde-${p.id}"></div>
             <div id="add-alunos-tde-${p.id}"></div>
             <div id="links-tde-${p.id}"></div>
           </div>
@@ -374,48 +372,6 @@ async function renderTurmaDetalhe() {
 
   content.querySelectorAll("[data-ver-resultado-tde]").forEach((el) => {
     el.addEventListener("click", () => setView("resultados", { provaAtualId: el.dataset.verResultadoTde }));
-  });
-
-  content.querySelectorAll("[data-editar-prazo-tde]").forEach((el) => {
-    el.addEventListener("click", () => {
-      const provaId = el.dataset.editarPrazoTde;
-      const prazoAtual = el.dataset.prazoAtual; // "" ou ISO string
-      const alvo = document.getElementById(`prazo-tde-${provaId}`);
-      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
-
-      const valorInputData = prazoAtual ? prazoAtual.slice(0, 10) : ""; // YYYY-MM-DD pro <input type="date">
-      alvo.innerHTML = `
-        <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <label class="mono muted" style="font-size:11px;">Novo prazo:</label>
-          <input type="date" id="input-prazo-${provaId}" value="${valorInputData}" style="background:var(--surface); border:1px solid var(--line); color:var(--ink); padding:5px 8px; font-size:12px;" />
-          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-salvar-prazo="${provaId}">Salvar</button>
-          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-limpar-prazo="${provaId}">Remover prazo (sem data limite)</button>
-          <span id="erro-prazo-${provaId}" style="width:100%;"></span>
-        </div>
-      `;
-
-      document.querySelector(`[data-salvar-prazo="${provaId}"]`).addEventListener("click", async () => {
-        const dataStr = document.getElementById(`input-prazo-${provaId}`).value; // "" ou "YYYY-MM-DD"
-        const erroEl = document.getElementById(`erro-prazo-${provaId}`);
-        if (!dataStr) { erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">Escolha uma data, ou clique em "Remover prazo".</div>`; return; }
-        const prazoFinal = new Date(dataStr + "T23:59:59").toISOString();
-        try {
-          await api(`/provas-mestre/${provaId}/prazo`, { method: "PUT", body: JSON.stringify({ prazoFinal }) });
-          renderTurmaDetalhe();
-        } catch (e) {
-          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
-        }
-      });
-
-      document.querySelector(`[data-limpar-prazo="${provaId}"]`).addEventListener("click", async () => {
-        try {
-          await api(`/provas-mestre/${provaId}/prazo`, { method: "PUT", body: JSON.stringify({ prazoFinal: null }) });
-          renderTurmaDetalhe();
-        } catch (e) {
-          document.getElementById(`erro-prazo-${provaId}`).innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
-        }
-      });
-    });
   });
 
   content.querySelectorAll("[data-add-alunos-tde]").forEach((el) => {
@@ -1161,7 +1117,7 @@ async function renderResultados() {
           <span style="font-size:13.5px;">${a.alunoNome}</span>
           <span class="mono muted" style="font-size:12px;">${a.status === 'finalizada' ? `${a.acertos}/${a.total} acertos${a.tentativasFeitas>1?` (${a.tentativasFeitas} tentativas)`:''}` : a.status}</span>
           <span style="font-family:var(--f-display); font-weight:700; font-size:15px; width:50px; text-align:right; color:${a.nota===null?'var(--ink-faint)':(a.nota>=r.valor*0.6?'var(--green)':'var(--red)')};">
-            ${a.nota !== null ? formatarBR(+a.nota.toFixed(2)) : "—"}
+            ${a.nota !== null ? formatarBR(+a.nota.toFixed(1)) : "—"}
           </span>
         </div>
       `).join("")}
@@ -1177,7 +1133,7 @@ async function renderResultados() {
     const linhas = r.alunos.map((a) => ({
       "Aluno": a.alunoNome,
       "Matrícula": a.matricula,
-      "Nota": a.nota !== null ? formatarBR(+a.nota.toFixed(2)) : "",
+      "Nota": a.nota !== null ? formatarBR(+a.nota.toFixed(1)) : "",
       "Valor do TDE": formatarBR(r.valor),
       "Acertos": a.status === "finalizada" ? `${a.acertos}/${a.total}` : "",
       "Tentativas": a.tentativasFeitas,

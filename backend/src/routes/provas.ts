@@ -281,24 +281,6 @@ provasRouter.post("/:id/adicionar-alunos", asyncHandler(async (req, res) => {
   res.json({ adicionados: provasCriadas.length, provas: provasCriadas });
 }));
 
-// PUT /api/provas-mestre/:id/prazo   body: { prazoFinal: string | null }
-// Edita só o prazo final de um TDE (mesmo já publicado, mesmo com alunos já respondendo).
-// Não mexe nas provas individuais já geradas — só muda a data limite pra novas respostas.
-provasRouter.put("/:id/prazo", asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { prazoFinal } = req.body as { prazoFinal?: string | null };
-
-  const provaMestre = await prisma.provaMestre.findUnique({ where: { id } });
-  if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
-
-  const atualizado = await prisma.provaMestre.update({
-    where: { id },
-    data: { prazoFinal: prazoFinal ? new Date(prazoFinal) : null },
-  });
-
-  res.json({ id: atualizado.id, prazoFinal: atualizado.prazoFinal });
-}));
-
 // DELETE /api/provas-mestre/:id -> apaga o TDE e tudo que depende dele
 // (provas individuais geradas, respostas dos alunos)
 provasRouter.delete("/:id", asyncHandler(async (req, res) => {
