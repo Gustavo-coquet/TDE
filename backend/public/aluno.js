@@ -108,11 +108,11 @@ function renderDecisao(dados) {
   content.innerHTML = `
     <div style="text-align:center; display:flex; flex-direction:column; gap:16px; align-items:center; padding-top:20px;">
       <div style="width:92px; height:92px; border-radius:50%; border:2px solid var(--teal); display:flex; align-items:center; justify-content:center;">
-        <span style="font-family:var(--f-display); font-size:22px; font-weight:700; color:var(--teal);">${formatarBR(+dados.melhorNota.toFixed(1))}</span>
+        <span style="font-family:var(--f-display); font-size:22px; font-weight:700; color:var(--teal);">${formatarBR(+dados.melhorNota.toFixed(2))}</span>
       </div>
       <h1 style="font-size:20px;">${dados.tituloProva}</h1>
       <p class="muted" style="font-size:13.5px;">
-        Olá, <b style="color:var(--ink);">${dados.alunoNome}</b>! Sua melhor nota até agora é <b style="color:var(--ink);">${formatarBR(+dados.melhorNota.toFixed(1))} de ${formatarBR(dados.valor)}</b>,
+        Olá, <b style="color:var(--ink);">${dados.alunoNome}</b>! Sua melhor nota até agora é <b style="color:var(--ink);">${formatarBR(+dados.melhorNota.toFixed(2))} de ${formatarBR(dados.valor)}</b>,
         em ${dados.tentativasFeitas} tentativa${dados.tentativasFeitas > 1 ? "s" : ""}.
       </p>
       ${dados.podeTentarDeNovo ? `
@@ -284,7 +284,7 @@ function renderResultado(r) {
       <h1 style="font-size:22px;">Tentativa ${r.tentativa} corrigida automaticamente</h1>
       <p class="muted" style="font-size:14px;">
         Você acertou <b style="color:var(--ink);">${r.acertos} de ${r.total}</b> questões —
-        nota <b style="color:var(--ink);">${formatarBR(+r.notaPontos.toFixed(1))} de ${formatarBR(r.valor)}</b>.
+        nota <b style="color:var(--ink);">${formatarBR(+r.notaPontos.toFixed(2))} de ${formatarBR(r.valor)}</b>.
       </p>
       <div style="display:flex; flex-direction:column; gap:8px; width:100%;">
         ${r.detalhe.map((d) => `
@@ -359,7 +359,7 @@ function gerarPDF(r) {
   escreverParagrafo(`${p.tituloProva} — Tentativa ${r.tentativa}`, 11, true);
   y += 1;
   escreverParagrafo(`Aluno: ${p.alunoNome}     Matrícula: ${token}`, 10, false);
-  escreverParagrafo(`Nota: ${formatarBR(+r.notaPontos.toFixed(1))} de ${formatarBR(r.valor)}  (${r.percentual}% de acerto — ${r.acertos} de ${r.total} questões)`, 10, false);
+  escreverParagrafo(`Nota: ${formatarBR(+r.notaPontos.toFixed(2))} de ${formatarBR(r.valor)}  (${r.percentual}% de acerto — ${r.acertos} de ${r.total} questões)`, 10, false);
   escreverParagrafo(`Comprovante gerado em: ${new Date().toLocaleString("pt-BR")}`, 9, false);
   y += 4;
 
