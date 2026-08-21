@@ -107,6 +107,26 @@ function formatarValorCampo(valor) {
   return typeof valor === "string" ? valor : formatarBR(valor);
 }
 
+// Converte o texto do enunciado pra HTML seguro, preservando a formatação que o professor escreveu:
+//  - quebras de linha (o navegador ignora \n por padrão, então viram <br>)
+//  - **negrito**
+//  - ^{sobrescrito}  ex.: mm^{2}  ->  mm²
+//  - _{subscrito}    ex.: φ_{BC}  ->  φ com BC embaixo
+// Escapa HTML antes de tudo, pra ninguém conseguir injetar código pelo enunciado.
+function formatarEnunciado(texto) {
+  if (!texto) return "";
+  const escapado = String(texto)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+  return escapado
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/\^\{(.+?)\}/g, "<sup>$1</sup>")
+    .replace(/_\{(.+?)\}/g, "<sub>$1</sub>")
+    .replace(/\n/g, "<br>");
+}
+
 async function api(path, options) {
   const res = await fetch(`/api${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -544,7 +564,7 @@ async function renderBanco(mostrarForm) {
               </div>
               <div class="dots">${[1,2,3,4,5].map(i => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
             </div>
-            <div class="mono muted" style="font-size:11.5px; margin-top:8px; line-height:1.6;">${q.preview.enunciado}</div>
+            <div class="mono muted" style="font-size:11.5px; margin-top:8px; line-height:1.6;">${formatarEnunciado(q.preview.enunciado)}</div>
           </div>
         `).join("")}
         ${filtradas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px;">${corners()}Nenhuma questão encontrada com esse filtro.</div>` : ""}
@@ -580,7 +600,7 @@ async function renderBanco(mostrarForm) {
           <div class="mono muted" style="font-size:11px; margin-top:12px;">${q.disciplina}</div>
           <div style="font-weight:600; font-size:15px; margin-top:2px;">${q.assunto}</div>
           ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-top:10px; border:1px solid var(--line-faint);" />` : ""}
-          <div style="font-size:13.5px; margin-top:10px; line-height:1.6;">${q.preview.enunciado}</div>
+          <div style="font-size:13.5px; margin-top:10px; line-height:1.6;">${formatarEnunciado(q.preview.enunciado)}</div>
           ${q.preview.erro
             ? `<div class="mono" style="color:var(--red); font-size:12px; margin-top:10px;">Erro: ${q.preview.erro}</div>`
             : `<div style="margin-top:12px;">${renderAlternativasPreview(q.preview.alternativas, q.formatoResposta)}</div>`}
@@ -669,6 +689,10 @@ function renderFormNovaQuestao(container) {
       <div class="field">
         <label>Enunciado (use {NOME} para referenciar qualquer variável OU etapa)</label>
         <textarea id="nq-enunciado" placeholder="Ex: Uma viga retangular tem base {b} cm e altura {h} cm...">${dados.enunciado}</textarea>
+        <div class="hint" style="margin-top:-8px; margin-bottom:14px;">
+          Formatação: as <b>quebras de linha</b> que você digitar são mantidas.
+          Use <code>**negrito**</code>, <code>^{2}</code> para expoente (mm<sup>2</sup>) e <code>_{BC}</code> para índice (φ<sub>BC</sub>).
+        </div>
       </div>
       <div class="field">
         <label>Imagem / esquema (opcional — diagrama, desenho da viga, circuito, etc.)</label>
@@ -886,7 +910,7 @@ function renderFormNovaQuestao(container) {
       const resultado = await api("/questoes/testar", { method: "POST", body: JSON.stringify(q) });
       previewEl.innerHTML = `<div class="ok-box">
         ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-bottom:10px; border:1px solid var(--line-faint);" />` : ""}
-        <div style="margin-bottom:10px;">${resultado.enunciado}</div>
+        <div style="margin-bottom:10px;">${formatarEnunciado(resultado.enunciado)}</div>
         ${renderAlternativasPreview(resultado.alternativas, q.formatoResposta)}
       </div>`;
     } catch (e) {

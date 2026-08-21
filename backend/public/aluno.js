@@ -15,6 +15,26 @@ function formatarValorCampo(valor) {
   return typeof valor === "string" ? valor : formatarBR(valor);
 }
 
+// Converte o texto do enunciado pra HTML seguro, preservando a formatação que o professor escreveu:
+//  - quebras de linha (o navegador ignora \n por padrão, então viram <br>)
+//  - **negrito**
+//  - ^{sobrescrito}  ex.: mm^{2}  ->  mm²
+//  - _{subscrito}    ex.: φ_{BC}  ->  φ com BC embaixo
+// Escapa HTML antes de tudo, pra ninguém conseguir injetar código pelo enunciado.
+function formatarEnunciado(texto) {
+  if (!texto) return "";
+  const escapado = String(texto)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+  return escapado
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/\^\{(.+?)\}/g, "<sup>$1</sup>")
+    .replace(/_\{(.+?)\}/g, "<sub>$1</sub>")
+    .replace(/\n/g, "<br>");
+}
+
 // monta o texto de uma alternativa; se a questão tiver um "formatoResposta" customizado
 // (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele SÓ pros campos que ele referencia — outros campos
 // marcados como "é resposta" que não aparecem no formato continuam mostrados do jeito padrão, do lado.
@@ -195,7 +215,7 @@ function renderProva() {
       <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
       <span class="pill">${q.tema}</span>
       ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 420px); max-height:320px; width:auto; height:auto; display:block; margin:14px auto 0; border:1px solid var(--line-faint); cursor:zoom-in;" onclick="window.open('${q.imagem}', '_blank')" title="Clique para ampliar" />` : ""}
-      <div style="font-size:15.5px; line-height:1.7; margin-top:14px;">${q.enunciado}</div>
+      <div style="font-size:15.5px; line-height:1.7; margin-top:14px;">${formatarEnunciado(q.enunciado)}</div>
       <div style="margin-top:18px;">
         ${q.alternativas.map((a) => `
           <div class="option ${state.respostas[q.id]===a.letra?'selected':''}" data-letra="${a.letra}">
@@ -367,7 +387,13 @@ function gerarPDF(r) {
     quebrarPagina(14);
     doc.setDrawColor(200); doc.line(margem, y, 210 - margem, y); y += 5;
     escreverParagrafo(`Questão ${idx + 1} — ${d.tema}  [${d.correta ? "ACERTOU" : "ERROU"}]`, 11, true);
-    escreverParagrafo(d.enunciado, 10, false);
+    // no PDF não dá pra aplicar negrito/sobrescrito no meio da linha, então só limpa as marcações
+    // e deixa o texto legível — as quebras de linha o splitTextToSize já respeita
+    const enunciadoPdf = String(d.enunciado || "")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/\^\{(.+?)\}/g, "$1")
+      .replace(/_\{(.+?)\}/g, "$1");
+    escreverParagrafo(enunciadoPdf, 10, false);
     y += 1;
     (d.alternativas || []).forEach((a) => {
       const escolhida = a.letra === d.respostaAlunoLetra;
