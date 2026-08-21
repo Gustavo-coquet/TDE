@@ -107,24 +107,33 @@ function formatarValorCampo(valor) {
   return typeof valor === "string" ? valor : formatarBR(valor);
 }
 
-// Converte o texto do enunciado pra HTML seguro, preservando a formatação que o professor escreveu:
-//  - quebras de linha (o navegador ignora \n por padrão, então viram <br>)
-//  - **negrito**
-//  - ^{sobrescrito}  ex.: mm^{2}  ->  mm²
-//  - _{subscrito}    ex.: φ_{BC}  ->  φ com BC embaixo
-// Escapa HTML antes de tudo, pra ninguém conseguir injetar código pelo enunciado.
-function formatarEnunciado(texto) {
+// Aplica a formatação inline (**negrito**, ^{sup}, _{sub}) e escapa HTML por segurança.
+// Não mexe em quebras de linha — serve tanto pro enunciado quanto pra nomes/unidades das respostas.
+function formatarInline(texto) {
   if (!texto) return "";
-  const escapado = String(texto)
+  return String(texto)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-  return escapado
+    .replace(/"/g, "&quot;")
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/\^\{(.+?)\}/g, "<sup>$1</sup>")
-    .replace(/_\{(.+?)\}/g, "<sub>$1</sub>")
-    .replace(/\n/g, "<br>");
+    .replace(/_\{(.+?)\}/g, "<sub>$1</sub>");
+}
+
+// Remove as marcações sem virar HTML — usado no PDF, que não entende tags.
+function limparMarcacoes(texto) {
+  if (!texto) return "";
+  return String(texto)
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\^\{(.+?)\}/g, "$1")
+    .replace(/_\{(.+?)\}/g, "$1");
+}
+
+// Igual ao formatarInline, mas também converte as quebras de linha em <br> (o navegador as ignora por padrão).
+function formatarEnunciado(texto) {
+  if (!texto) return "";
+  return formatarInline(texto).replace(/\n/g, "<br>");
 }
 
 async function api(path, options) {
@@ -636,7 +645,9 @@ async function renderBanco(mostrarForm) {
 // se "formato" for informado (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele pra montar uma expressão única
 // SÓ pros campos que ele realmente referencia — outros campos marcados como "é resposta" que não
 // aparecem no formato continuam sendo mostrados do jeito padrão, do lado.
-function textoAlternativa(campos, formato) {
+// comFormatacao=true converte **negrito**, ^{sup} e _{sub} pra HTML; use false pro PDF, que não entende HTML.
+function textoAlternativa(campos, formato, comFormatacao = true) {
+  const fmt = (t) => (comFormatacao ? formatarInline(t) : limparMarcacoes(t));
   if (formato) {
     let out = formato;
     const usados = new Set();
@@ -646,11 +657,12 @@ function textoAlternativa(campos, formato) {
         usados.add(c.nome);
       }
     });
+    out = fmt(out);
     const restantes = campos.filter((c) => !usados.has(c.nome));
-    const textoRestante = restantes.map((c) => `${c.nome} = ${formatarValorCampo(c.valor)} ${c.unidade}`).join("   |   ");
+    const textoRestante = restantes.map((c) => `${fmt(c.nome)} = ${formatarValorCampo(c.valor)} ${fmt(c.unidade)}`).join("   |   ");
     return textoRestante ? `${out}   |   ${textoRestante}` : out;
   }
-  return campos.map((c) => `${c.nome} = ${formatarValorCampo(c.valor)} ${c.unidade}`).join("   |   ");
+  return campos.map((c) => `${fmt(c.nome)} = ${formatarValorCampo(c.valor)} ${fmt(c.unidade)}`).join("   |   ");
 }
 
 function renderAlternativasPreview(alternativas, formato) {
@@ -702,9 +714,9 @@ function renderFormNovaQuestao(container) {
       <div class="field">
         <label>Formatação — selecione um trecho do enunciado e clique no botão</label>
         <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
-          <button type="button" class="btn subtle" data-formatar="negrito" style="padding:6px 14px; font-weight:700;">N</button>
-          <button type="button" class="btn subtle" data-formatar="sobrescrito" style="padding:6px 14px;">x<sup>2</sup></button>
-          <button type="button" class="btn subtle" data-formatar="subscrito" style="padding:6px 14px;">x<sub>2</sub></button>
+          <button type="button" class="btn subtle" data-formatar="negrito" style="padding:6px 14px; font-weight:700;" title="Negrito">N</button>
+          <button type="button" class="btn subtle" data-formatar="sobrescrito" style="padding:6px 14px;" title="Sobrescrito (expoente), ex.: mm²">x<sup>2</sup> ↑</button>
+          <button type="button" class="btn subtle" data-formatar="subscrito" style="padding:6px 14px;" title="Subscrito (índice), ex.: φBC">x<sub>2</sub> ↓</button>
         </div>
       </div>
       <div class="field">
@@ -886,7 +898,7 @@ function renderFormNovaQuestao(container) {
         </div>
         <div class="etapa-row2">
           <label class="mono muted" style="font-size:11px;">decimais <input type="number" value="${et.decimais}" data-ei="${i}" data-ecampo="decimais" class="mono" style="width:50px; margin-left:4px;" /></label>
-          <label class="mono muted" style="font-size:11px;">unidade <input value="${et.unidade}" data-ei="${i}" data-ecampo="unidade" class="mono" style="width:80px; margin-left:4px;" /></label>
+          <label class="mono muted" style="font-size:11px;">unidade <input value="${et.unidade}" data-ei="${i}" data-ecampo="unidade" class="mono" style="width:110px; margin-left:4px;" title="Aceita formatação: mm^{2} vira mm², kN_{x} vira kN com x embaixo" /></label>
           <label style="font-size:11.5px; display:flex; align-items:center; gap:5px;">
             <input type="checkbox" ${et.saida ? "checked" : ""} data-ei="${i}" data-ecampo="saida" style="width:auto;" /> é resposta (aparece nas alternativas)
           </label>
