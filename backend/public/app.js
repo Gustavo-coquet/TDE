@@ -833,11 +833,19 @@ function renderFormNovaQuestao(container) {
     subscrito:   { antes: "_{",  depois: "}" },
   };
   document.querySelectorAll("[data-formatar]").forEach((btn) => {
-    // impede que o clique tire o foco do textarea — sem isso, a seleção some antes do clique ser processado
+    // impede que o clique tire o foco do campo — sem isso, a seleção some antes do clique ser processado
     btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", () => {
-      const el = campoAtivo && campoAtivo.tagName === "TEXTAREA" ? campoAtivo : document.getElementById("nq-enunciado");
+      const el = campoAtivo || document.getElementById("nq-enunciado");
       if (!el) return;
+
+      // não deixa formatar dentro de um campo de fórmula: ali "^" já é potência e "_" faz parte
+      // do nome da variável, então a marcação quebraria o cálculo
+      if (el.dataset && el.dataset.ecampo === "formula") {
+        alert("A formatação não se aplica ao campo de fórmula (ali o ^ já significa potência).\n\nUse nos campos de enunciado, nome da etapa, unidade ou no formato customizado da resposta.");
+        return;
+      }
+
       const { antes, depois } = MARCACOES[btn.dataset.formatar];
       const start = el.selectionStart ?? el.value.length;
       const end = el.selectionEnd ?? el.value.length;
