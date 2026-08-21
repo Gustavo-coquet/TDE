@@ -15,30 +15,41 @@ function formatarValorCampo(valor) {
   return typeof valor === "string" ? valor : formatarBR(valor);
 }
 
-// Converte o texto do enunciado pra HTML seguro, preservando a formatação que o professor escreveu:
-//  - quebras de linha (o navegador ignora \n por padrão, então viram <br>)
-//  - **negrito**
-//  - ^{sobrescrito}  ex.: mm^{2}  ->  mm²
-//  - _{subscrito}    ex.: φ_{BC}  ->  φ com BC embaixo
-// Escapa HTML antes de tudo, pra ninguém conseguir injetar código pelo enunciado.
-function formatarEnunciado(texto) {
+// Aplica a formatação inline (**negrito**, ^{sup}, _{sub}) e escapa HTML por segurança.
+// Não mexe em quebras de linha — serve tanto pro enunciado quanto pra nomes/unidades das respostas.
+function formatarInline(texto) {
   if (!texto) return "";
-  const escapado = String(texto)
+  return String(texto)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-  return escapado
+    .replace(/"/g, "&quot;")
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/\^\{(.+?)\}/g, "<sup>$1</sup>")
-    .replace(/_\{(.+?)\}/g, "<sub>$1</sub>")
-    .replace(/\n/g, "<br>");
+    .replace(/_\{(.+?)\}/g, "<sub>$1</sub>");
+}
+
+// Remove as marcações sem virar HTML — usado no PDF, que não entende tags.
+function limparMarcacoes(texto) {
+  if (!texto) return "";
+  return String(texto)
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\^\{(.+?)\}/g, "$1")
+    .replace(/_\{(.+?)\}/g, "$1");
+}
+
+// Igual ao formatarInline, mas também converte as quebras de linha em <br> (o navegador as ignora por padrão).
+function formatarEnunciado(texto) {
+  if (!texto) return "";
+  return formatarInline(texto).replace(/\n/g, "<br>");
 }
 
 // monta o texto de uma alternativa; se a questão tiver um "formatoResposta" customizado
 // (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele SÓ pros campos que ele referencia — outros campos
 // marcados como "é resposta" que não aparecem no formato continuam mostrados do jeito padrão, do lado.
-function textoAlternativa(campos, formato) {
+// comFormatacao=true converte as marcações pra HTML; use false pro PDF, que não entende HTML.
+function textoAlternativa(campos, formato, comFormatacao = true) {
+  const fmt = (t) => (comFormatacao ? formatarInline(t) : limparMarcacoes(t));
   if (formato) {
     let out = formato;
     const usados = new Set();
@@ -48,11 +59,12 @@ function textoAlternativa(campos, formato) {
         usados.add(c.nome);
       }
     });
+    out = fmt(out);
     const restantes = campos.filter((c) => !usados.has(c.nome));
-    const textoRestante = restantes.map((c) => `${c.nome} = ${formatarValorCampo(c.valor)} ${c.unidade}`).join("   |   ");
+    const textoRestante = restantes.map((c) => `${fmt(c.nome)} = ${formatarValorCampo(c.valor)} ${fmt(c.unidade)}`).join("   |   ");
     return textoRestante ? `${out}   |   ${textoRestante}` : out;
   }
-  return campos.map((c) => `${c.nome} = ${formatarValorCampo(c.valor)} ${c.unidade}`).join("   |   ");
+  return campos.map((c) => `${fmt(c.nome)} = ${formatarValorCampo(c.valor)} ${fmt(c.unidade)}`).join("   |   ");
 }
 
 async function api(path, options) {
@@ -389,18 +401,14 @@ function gerarPDF(r) {
     escreverParagrafo(`Questão ${idx + 1} — ${d.tema}  [${d.correta ? "ACERTOU" : "ERROU"}]`, 11, true);
     // no PDF não dá pra aplicar negrito/sobrescrito no meio da linha, então só limpa as marcações
     // e deixa o texto legível — as quebras de linha o splitTextToSize já respeita
-    const enunciadoPdf = String(d.enunciado || "")
-      .replace(/\*\*(.+?)\*\*/g, "$1")
-      .replace(/\^\{(.+?)\}/g, "$1")
-      .replace(/_\{(.+?)\}/g, "$1");
-    escreverParagrafo(enunciadoPdf, 10, false);
+    escreverParagrafo(limparMarcacoes(d.enunciado), 10, false);
     y += 1;
     (d.alternativas || []).forEach((a) => {
       const escolhida = a.letra === d.respostaAlunoLetra;
       const correta = a.letra === d.respostaCorretaLetra;
       const marcador = escolhida ? "[X]" : "[ ]";
       const rotulo = correta ? " (RESPOSTA CORRETA)" : "";
-      const texto = `${marcador} ${a.letra}) ${textoAlternativa(a.campos, d.formatoResposta)}${rotulo}`;
+      const texto = `${marcador} ${a.letra}) ${textoAlternativa(a.campos, d.formatoResposta, false)}${rotulo}`;
       escreverParagrafo(texto, 9.5, correta || escolhida);
     });
     y += 4;
