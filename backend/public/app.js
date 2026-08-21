@@ -690,14 +690,22 @@ function renderFormNovaQuestao(container) {
         <label>Enunciado (use {NOME} para referenciar qualquer variável OU etapa)</label>
         <textarea id="nq-enunciado" placeholder="Ex: Uma viga retangular tem base {b} cm e altura {h} cm...">${dados.enunciado}</textarea>
         <div class="hint" style="margin-top:-8px; margin-bottom:14px;">
-          Formatação: as <b>quebras de linha</b> que você digitar são mantidas.
-          Use <code>**negrito**</code>, <code>^{2}</code> para expoente (mm<sup>2</sup>) e <code>_{BC}</code> para índice (φ<sub>BC</sub>).
+          As <b>quebras de linha</b> que você digitar são mantidas. Para negrito, expoente ou índice, selecione o trecho e use os botões abaixo
+          (ou escreva à mão: <code>**negrito**</code>, <code>^{2}</code>, <code>_{BC}</code>).
         </div>
       </div>
       <div class="field">
         <label>Imagem / esquema (opcional — diagrama, desenho da viga, circuito, etc.)</label>
         <input type="file" id="nq-imagem" accept="image/*" />
         <div id="nq-imagem-preview" style="margin-top:8px;"></div>
+      </div>
+      <div class="field">
+        <label>Formatação — selecione um trecho do enunciado e clique no botão</label>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
+          <button type="button" class="btn subtle" data-formatar="negrito" style="padding:6px 14px; font-weight:700;">N</button>
+          <button type="button" class="btn subtle" data-formatar="sobrescrito" style="padding:6px 14px;">x<sup>2</sup></button>
+          <button type="button" class="btn subtle" data-formatar="subscrito" style="padding:6px 14px;">x<sub>2</sub></button>
+        </div>
       </div>
       <div class="field">
         <label>Letras gregas e símbolos (î, ĵ, k̂, °, ±...) — clique num campo de texto abaixo e depois no símbolo pra inserir</label>
@@ -791,6 +799,7 @@ function renderFormNovaQuestao(container) {
     `<button type="button" class="btn subtle" data-letra-grega="${l}" style="padding:5px 10px; font-size:14px; font-family:var(--f-mono);">${l}</button>`
   ).join("");
   document.querySelectorAll("[data-letra-grega]").forEach((btn) => {
+    btn.addEventListener("mousedown", (e) => e.preventDefault()); // mantém o foco/cursor no campo de texto
     btn.addEventListener("click", () => {
       const el = campoAtivo;
       if (!el) return;
@@ -800,6 +809,38 @@ function renderFormNovaQuestao(container) {
       el.value = el.value.slice(0, start) + ch + el.value.slice(end);
       el.selectionStart = el.selectionEnd = start + ch.length;
       el.dispatchEvent(new Event("input", { bubbles: true })); // sem isso, o valor não era salvo (ficava só na tela)
+      el.focus();
+    });
+  });
+
+  // botões de formatação estilo Word: envolvem o trecho selecionado com a marcação correspondente.
+  // se nada estiver selecionado, insere a marcação vazia e deixa o cursor no meio, pronto pra digitar.
+  const MARCACOES = {
+    negrito:     { antes: "**",  depois: "**" },
+    sobrescrito: { antes: "^{",  depois: "}" },
+    subscrito:   { antes: "_{",  depois: "}" },
+  };
+  document.querySelectorAll("[data-formatar]").forEach((btn) => {
+    // impede que o clique tire o foco do textarea — sem isso, a seleção some antes do clique ser processado
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => {
+      const el = campoAtivo && campoAtivo.tagName === "TEXTAREA" ? campoAtivo : document.getElementById("nq-enunciado");
+      if (!el) return;
+      const { antes, depois } = MARCACOES[btn.dataset.formatar];
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? el.value.length;
+      const selecionado = el.value.slice(start, end);
+
+      el.value = el.value.slice(0, start) + antes + selecionado + depois + el.value.slice(end);
+      if (selecionado) {
+        // mantém o trecho selecionado, agora já formatado
+        el.selectionStart = start + antes.length;
+        el.selectionEnd = start + antes.length + selecionado.length;
+      } else {
+        // nada selecionado: deixa o cursor entre as marcações pra digitar direto
+        el.selectionStart = el.selectionEnd = start + antes.length;
+      }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
       el.focus();
     });
   });
