@@ -8,7 +8,7 @@ const state = {
   alunosSelecionados: new Set(),
   publicarResultado: null,
   novaQuestaoVars: [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }],
-  novaQuestaoEtapas: [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true }],
+  novaQuestaoEtapas: [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true, notacaoCientifica: false }],
   editandoQuestaoId: null,
   editandoQuestaoDados: null,
   novaQuestaoImagem: null,
@@ -103,8 +103,24 @@ function formatarBR(n) {
 
 // campos de etapas de texto (ex.: "1º quadrante", vindo de um se(...)) devem aparecer do jeito
 // que estão, sem tentar formatar como número
-function formatarValorCampo(valor) {
-  return typeof valor === "string" ? valor : formatarBR(valor);
+function formatarValorCampo(valor, campo) {
+  if (typeof valor === "string") return valor;
+
+  const casas = campo && typeof campo.decimais === "number" ? campo.decimais : null;
+
+  // notação científica: 1840 -> 1,84 × 10³ (o expoente vira sobrescrito na exibição)
+  if (campo && campo.notacaoCientifica) {
+    if (valor === 0) return "0";
+    const expoente = Math.floor(Math.log10(Math.abs(valor)));
+    const mantissa = valor / Math.pow(10, expoente);
+    const mantissaTxt = (casas !== null ? mantissa.toFixed(casas) : String(mantissa)).replace(".", ",");
+    return `${mantissaTxt} × 10^{${expoente}}`;
+  }
+
+  // casas fixas: todas as alternativas exibem a mesma quantidade, senão a correta se destacaria
+  // (ex.: 1,8361 no meio de valores com 2 casas entregaria a resposta)
+  if (casas !== null) return valor.toFixed(casas).replace(".", ",");
+  return formatarBR(valor);
 }
 
 // Aplica a formatação inline (**negrito**, ^{sup}, _{sub}) e escapa HTML por segurança.
@@ -593,7 +609,7 @@ async function renderBanco(mostrarForm) {
     state.editandoQuestaoId = null;
     state.editandoQuestaoDados = null;
     state.novaQuestaoVars = [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }];
-    state.novaQuestaoEtapas = [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true }];
+    state.novaQuestaoEtapas = [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true, notacaoCientifica: false }];
     state.novaQuestaoImagem = null;
     renderBanco(!mostrarForm);
   });
@@ -653,16 +669,16 @@ function textoAlternativa(campos, formato, comFormatacao = true) {
     const usados = new Set();
     campos.forEach((c) => {
       if (out.includes(`{${c.nome}}`)) {
-        out = out.split(`{${c.nome}}`).join(formatarValorCampo(c.valor));
+        out = out.split(`{${c.nome}}`).join(formatarValorCampo(c.valor, c));
         usados.add(c.nome);
       }
     });
     out = fmt(out);
     const restantes = campos.filter((c) => !usados.has(c.nome));
-    const textoRestante = restantes.map((c) => `${fmt(c.nome)} = ${formatarValorCampo(c.valor)} ${fmt(c.unidade)}`).join("   |   ");
+    const textoRestante = restantes.map((c) => `${fmt(c.nome)} = ${fmt(formatarValorCampo(c.valor, c))} ${fmt(c.unidade)}`).join("   |   ");
     return textoRestante ? `${out}   |   ${textoRestante}` : out;
   }
-  return campos.map((c) => `${fmt(c.nome)} = ${formatarValorCampo(c.valor)} ${fmt(c.unidade)}`).join("   |   ");
+  return campos.map((c) => `${fmt(c.nome)} = ${fmt(formatarValorCampo(c.valor, c))} ${fmt(c.unidade)}`).join("   |   ");
 }
 
 function renderAlternativasPreview(alternativas, formato) {
@@ -910,6 +926,9 @@ function renderFormNovaQuestao(container) {
           <label style="font-size:11.5px; display:flex; align-items:center; gap:5px;">
             <input type="checkbox" ${et.saida ? "checked" : ""} data-ei="${i}" data-ecampo="saida" style="width:auto;" /> é resposta (aparece nas alternativas)
           </label>
+          <label style="font-size:11.5px; display:flex; align-items:center; gap:5px;" title="Exibe o resultado como 1,84 × 10³ em vez de 1840">
+            <input type="checkbox" ${et.notacaoCientifica ? "checked" : ""} data-ei="${i}" data-ecampo="notacaoCientifica" style="width:auto;" /> notação científica
+          </label>
         </div>
       </div>
     `).join("");
@@ -917,7 +936,7 @@ function renderFormNovaQuestao(container) {
       el.addEventListener("focusin", () => { campoAtivo = el; });
       el.addEventListener("input", () => {
         const i = Number(el.dataset.ei), campo = el.dataset.ecampo;
-        if (campo === "saida") state.novaQuestaoEtapas[i][campo] = el.checked;
+        if (campo === "saida" || campo === "notacaoCientifica") state.novaQuestaoEtapas[i][campo] = el.checked;
         else if (campo === "decimais") state.novaQuestaoEtapas[i][campo] = Number(el.value);
         else state.novaQuestaoEtapas[i][campo] = el.value;
       });
@@ -932,7 +951,7 @@ function renderFormNovaQuestao(container) {
   renderEtapaRows();
 
   document.getElementById("nq-add-etapa").addEventListener("click", () => {
-    state.novaQuestaoEtapas.push({ nome: "", formula: "", decimais: 2, unidade: "", saida: true });
+    state.novaQuestaoEtapas.push({ nome: "", formula: "", decimais: 2, unidade: "", saida: true, notacaoCientifica: false });
     renderEtapaRows();
   });
 
@@ -994,7 +1013,7 @@ function renderFormNovaQuestao(container) {
       state.editandoQuestaoId = null;
       state.editandoQuestaoDados = null;
       state.novaQuestaoVars = [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }];
-      state.novaQuestaoEtapas = [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true }];
+      state.novaQuestaoEtapas = [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true, notacaoCientifica: false }];
       state.novaQuestaoImagem = null;
       renderBanco(false);
     } catch (e) {

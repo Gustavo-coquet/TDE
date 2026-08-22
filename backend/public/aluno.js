@@ -11,8 +11,24 @@ function formatarBR(n) {
 
 // campos de etapas de texto (ex.: "1º quadrante", vindo de um se(...)) devem aparecer do jeito
 // que estão, sem tentar formatar como número
-function formatarValorCampo(valor) {
-  return typeof valor === "string" ? valor : formatarBR(valor);
+function formatarValorCampo(valor, campo) {
+  if (typeof valor === "string") return valor;
+
+  const casas = campo && typeof campo.decimais === "number" ? campo.decimais : null;
+
+  // notação científica: 1840 -> 1,84 × 10³ (o expoente vira sobrescrito na exibição)
+  if (campo && campo.notacaoCientifica) {
+    if (valor === 0) return "0";
+    const expoente = Math.floor(Math.log10(Math.abs(valor)));
+    const mantissa = valor / Math.pow(10, expoente);
+    const mantissaTxt = (casas !== null ? mantissa.toFixed(casas) : String(mantissa)).replace(".", ",");
+    return `${mantissaTxt} × 10^{${expoente}}`;
+  }
+
+  // casas fixas: todas as alternativas exibem a mesma quantidade, senão a correta se destacaria
+  // (ex.: 1,8361 no meio de valores com 2 casas entregaria a resposta)
+  if (casas !== null) return valor.toFixed(casas).replace(".", ",");
+  return formatarBR(valor);
 }
 
 // Aplica a formatação inline (**negrito**, ^{sup}, _{sub}) e escapa HTML por segurança.
@@ -55,16 +71,16 @@ function textoAlternativa(campos, formato, comFormatacao = true) {
     const usados = new Set();
     campos.forEach((c) => {
       if (out.includes(`{${c.nome}}`)) {
-        out = out.split(`{${c.nome}}`).join(formatarValorCampo(c.valor));
+        out = out.split(`{${c.nome}}`).join(formatarValorCampo(c.valor, c));
         usados.add(c.nome);
       }
     });
     out = fmt(out);
     const restantes = campos.filter((c) => !usados.has(c.nome));
-    const textoRestante = restantes.map((c) => `${fmt(c.nome)} = ${formatarValorCampo(c.valor)} ${fmt(c.unidade)}`).join("   |   ");
+    const textoRestante = restantes.map((c) => `${fmt(c.nome)} = ${fmt(formatarValorCampo(c.valor, c))} ${fmt(c.unidade)}`).join("   |   ");
     return textoRestante ? `${out}   |   ${textoRestante}` : out;
   }
-  return campos.map((c) => `${fmt(c.nome)} = ${formatarValorCampo(c.valor)} ${fmt(c.unidade)}`).join("   |   ");
+  return campos.map((c) => `${fmt(c.nome)} = ${fmt(formatarValorCampo(c.valor, c))} ${fmt(c.unidade)}`).join("   |   ");
 }
 
 async function api(path, options) {

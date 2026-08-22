@@ -14,6 +14,7 @@ export interface EtapaDb {
   decimais: number;   // ignorado se a etapa devolver texto
   unidade: string;    // pode ficar vazio pra etapas de texto
   saida: boolean;     // true = esta etapa aparece como uma das respostas mostradas ao aluno
+  notacaoCientifica?: boolean; // true = exibe como 1,84 × 10^3 em vez de 1840
 }
 
 export interface QuestaoDb {
@@ -27,6 +28,8 @@ export interface CampoAlternativa {
   nome: string;
   unidade: string;
   valor: Valor; // número (caso normal) ou texto (quando a etapa usa se(...;"texto";"texto"))
+  decimais?: number;           // quantas casas exibir (todas as alternativas usam a mesma, pra não denunciar a correta)
+  notacaoCientifica?: boolean; // exibir em notação científica
 }
 
 export interface AlternativaGerada {
@@ -134,7 +137,7 @@ export function gerarAlternativasParaQuestao(
   const etapasSaida = etapas.filter((e) => e.saida);
   const saidasNumericas = etapasSaida
     .filter((e) => typeof valores[e.nome] === "number")
-    .map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] as number }));
+    .map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] as number, decimais: e.decimais, notacaoCientifica: e.notacaoCientifica }));
   const etapasTexto = etapasSaida.filter((e) => typeof valores[e.nome] === "string");
 
   const alternativas = gerarAlternativasMulti(saidasNumericas, rng);
@@ -169,13 +172,18 @@ export function gerarAlternativasParaQuestao(
  * certos e errados, então um aluno que acerta só uma etapa não acerta a questão.
  */
 export function gerarAlternativasMulti(
-  saidas: { nome: string; unidade: string; valor: number }[],
+  saidas: { nome: string; unidade: string; valor: number; decimais?: number; notacaoCientifica?: boolean }[],
   rng: Rng
 ): AlternativaGerada[] {
   const TOTAL_ALTERNATIVAS = 8; // A até H — só uma correta, dificulta o chute
   const fatores = [0.4, 0.5, 0.6, 0.75, 1.25, 1.5, 1.75, 2, 2.5];
 
-  const pools = saidas.map((s) => {
+  // cada distrator é arredondado com a MESMA quantidade de casas da etapa correspondente.
+  // sem isso, a alternativa correta apareceria com mais casas que as outras (ex.: 1,8361 no meio
+  // de valores com 2 casas) e entregaria a resposta de graça.
+  const casas = saidas.map((s) => (typeof s.decimais === "number" ? s.decimais : 2));
+
+  const pools = saidas.map((s, idx) => {
     const valores = new Set<number>();
     let tentativas = 0;
     // se o valor certo é negativo (ângulo, componente de vetor...), aceita distratores negativos também;
@@ -185,7 +193,7 @@ export function gerarAlternativasMulti(
       tentativas++;
       const fator = fatores[rng.int(0, fatores.length - 1)];
       const sinal = rng.int(0, 1) ? 1 : -1;
-      const errado = round2(s.valor * fator + sinal * rng.int(1, 5));
+      const errado = roundTo(s.valor * fator + sinal * rng.int(1, 5), casas[idx]);
       if (errado !== s.valor && !valores.has(errado) && (podeSerNegativo || errado > 0)) valores.add(errado);
     }
     return Array.from(valores);
@@ -212,13 +220,13 @@ export function gerarAlternativasMulti(
     const tupla = saidas.map((s, i) => {
       const pool = pools[i];
       const base = pool.length ? pool[rng.int(0, pool.length - 1)] : s.valor;
-      return round2(base + rng.int(1, 5));
+      return roundTo(base + rng.int(1, 5), casas[i]);
     });
     tuplas.push(tupla);
   }
 
   const arr = tuplas.map((tupla) => ({
-    campos: saidas.map((s, i) => ({ nome: s.nome, unidade: s.unidade, valor: tupla[i] as Valor })),
+    campos: saidas.map((s, i) => ({ nome: s.nome, unidade: s.unidade, valor: tupla[i] as Valor, decimais: casas[i], notacaoCientifica: s.notacaoCientifica })),
     correta: tupla.every((v, i) => v === tuplaCorreta[i]),
   }));
 
