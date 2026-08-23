@@ -90,7 +90,16 @@ export function resolverEtapas(variaveis: VariavelDb[], etapas: EtapaDb[], rng: 
   const valores: Record<string, Valor> = gerarValores(variaveis, rng);
   for (const etapa of etapas) {
     const bruto = avaliarExpressao(etapa.formula, valores);
-    valores[etapa.nome] = typeof bruto === "number" ? roundTo(bruto, etapa.decimais) : bruto;
+    if (typeof bruto !== "number") {
+      valores[etapa.nome] = bruto;
+    } else if (etapa.notacaoCientifica) {
+      // em notação científica o valor NÃO é arredondado aqui: um resultado como 0,000032
+      // viraria zero se arredondado a 4 casas. As casas decimais passam a valer só pra
+      // mantissa, na hora de exibir (ex.: 3,2000 × 10⁻⁵).
+      valores[etapa.nome] = bruto;
+    } else {
+      valores[etapa.nome] = roundTo(bruto, etapa.decimais);
+    }
   }
   return valores;
 }
@@ -189,11 +198,16 @@ export function gerarAlternativasMulti(
     // se o valor certo é negativo (ângulo, componente de vetor...), aceita distratores negativos também;
     // se o valor certo é positivo (densidade, força, massa...), não faz sentido gerar um errado negativo
     const podeSerNegativo = s.valor < 0;
+    // o "empurrãozinho" extra é proporcional à grandeza do valor: somar 1..5 fixo faria um
+    // resultado como 0,000032 virar distratores absurdos (3, 4...), fora de escala.
+    const escala = Math.abs(s.valor) || 1;
     while (valores.size < TOTAL_ALTERNATIVAS - 1 && tentativas < 150) {
       tentativas++;
       const fator = fatores[rng.int(0, fatores.length - 1)];
       const sinal = rng.int(0, 1) ? 1 : -1;
-      const errado = roundTo(s.valor * fator + sinal * rng.int(1, 5), casas[idx]);
+      const bruto = s.valor * fator + sinal * escala * (rng.int(1, 20) / 100); // ±1% a ±20% do valor
+      // em notação científica não arredondamos aqui — o arredondamento vira mantissa na exibição
+      const errado = s.notacaoCientifica ? bruto : roundTo(bruto, casas[idx]);
       if (errado !== s.valor && !valores.has(errado) && (podeSerNegativo || errado > 0)) valores.add(errado);
     }
     return Array.from(valores);
@@ -220,7 +234,9 @@ export function gerarAlternativasMulti(
     const tupla = saidas.map((s, i) => {
       const pool = pools[i];
       const base = pool.length ? pool[rng.int(0, pool.length - 1)] : s.valor;
-      return roundTo(base + rng.int(1, 5), casas[i]);
+      const escala = Math.abs(s.valor) || 1;
+      const bruto = base + escala * (rng.int(1, 25) / 100); // ajuste proporcional, não soma fixa
+      return s.notacaoCientifica ? bruto : roundTo(bruto, casas[i]);
     });
     tuplas.push(tupla);
   }
