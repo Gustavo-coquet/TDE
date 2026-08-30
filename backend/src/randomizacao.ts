@@ -149,6 +149,15 @@ export function gerarAlternativasParaQuestao(
     .map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] as number, decimais: e.decimais, notacaoCientifica: e.notacaoCientifica }));
   const etapasTexto = etapasSaida.filter((e) => typeof valores[e.nome] === "string");
 
+  // Caso especial: a resposta é SÓ texto (ex.: "2 < x < 7", "x < 3 ou x > 8"), sem nenhum
+  // campo numérico de saída. Aqui não há número visível pra variar, então as 8 alternativas
+  // sairiam idênticas. A saída é variar as etapas INTERMEDIÁRIAS (as que não são resposta,
+  // mas alimentam o texto) e recalcular a fórmula com esses valores alterados — assim cada
+  // alternativa recebe um intervalo diferente, e todos continuam plausíveis.
+  if (saidasNumericas.length === 0 && etapasTexto.length > 0) {
+    return gerarAlternativasSomenteTexto(etapas, etapasTexto, valores, rng);
+  }
+
   const alternativas = gerarAlternativasMulti(saidasNumericas, rng);
 
   if (etapasTexto.length > 0) {
@@ -172,6 +181,67 @@ export function gerarAlternativasParaQuestao(
   }
 
   return alternativas;
+}
+
+/**
+ * Gera alternativas quando TODAS as saídas são texto (intervalos de inequação, classificações...).
+ * Estratégia: perturbar os valores numéricos que o texto usa (variáveis de entrada e etapas
+ * intermediárias) e recalcular a fórmula, produzindo textos diferentes mas com a mesma "cara".
+ */
+function gerarAlternativasSomenteTexto(
+  todasEtapas: EtapaDb[],
+  etapasTexto: EtapaDb[],
+  valores: Record<string, Valor>,
+  rng: Rng
+): AlternativaGerada[] {
+  const TOTAL = 8;
+
+  // números que o texto pode usar: variáveis de entrada + etapas intermediárias numéricas
+  const nomesNumericos = Object.keys(valores).filter((k) => typeof valores[k] === "number");
+
+  const textosCorretos = etapasTexto.map((et) => String(valores[et.nome]));
+  const vistos = new Set<string>([textosCorretos.join("§")]);
+  const conjuntos: { textos: string[]; correta: boolean }[] = [
+    { textos: textosCorretos, correta: true },
+  ];
+
+  let tentativas = 0;
+  while (conjuntos.length < TOTAL && tentativas < 400) {
+    tentativas++;
+
+    // perturba os números e recalcula as etapas em cadeia, pra manter tudo coerente
+    const contexto: Record<string, Valor> = { ...valores };
+    for (const nome of nomesNumericos) {
+      const original = valores[nome] as number;
+      const escala = Math.abs(original) || 1;
+      const delta = escala * (rng.int(10, 60) / 100) * (rng.int(0, 1) ? 1 : -1);
+      contexto[nome] = Math.round(original + delta);
+    }
+    // recalcula as etapas na ordem, pra que "menor"/"maior" etc. acompanhem os novos números
+    for (const et of todasEtapas) {
+      try {
+        const v = avaliarExpressao(et.formula, contexto);
+        contexto[et.nome] = typeof v === "number" ? roundTo(v, et.decimais) : v;
+      } catch {
+        /* etapa que não resolve com esses valores: ignora e segue */
+      }
+    }
+
+    const textos = etapasTexto.map((et) => String(contexto[et.nome] ?? valores[et.nome]));
+    const chave = textos.join("§");
+    if (!vistos.has(chave)) {
+      vistos.add(chave);
+      conjuntos.push({ textos, correta: false });
+    }
+  }
+
+  const arr = conjuntos.map((c) => ({
+    campos: etapasTexto.map((et, i) => ({ nome: et.nome, unidade: et.unidade, valor: c.textos[i] as Valor })),
+    correta: c.correta,
+  }));
+
+  const embaralhado = shuffle(arr, rng);
+  return embaralhado.map((a, i) => ({ ...a, letra: String.fromCharCode(65 + i) }));
 }
 
 /**
