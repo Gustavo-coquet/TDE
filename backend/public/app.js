@@ -1096,13 +1096,18 @@ async function renderMontar() {
         ${renderBarraFiltro("montar", questoes, state.filtroMontar)}
         <div id="lista-questoes">
           ${aplicarFiltro(questoes, state.filtroMontar).map((q) => `
-            <div class="list-item ${state.selecionadas.has(q.id) ? "checked" : ""}" data-toggle-questao="${q.id}">
-              <div class="checkbox ${state.selecionadas.has(q.id) ? "on" : ""}">${state.selecionadas.has(q.id) ? "✓" : ""}</div>
-              <div style="flex:1;">
-                <div class="mono muted" style="font-size:10.5px;">${q.disciplina}</div>
-                <div style="font-weight:600; font-size:13.5px;">${q.assunto}</div>
+            <div class="list-item ${state.selecionadas.has(q.id) ? "checked" : ""}" data-toggle-questao="${q.id}" style="align-items:flex-start;">
+              <div class="checkbox ${state.selecionadas.has(q.id) ? "on" : ""}" style="margin-top:2px;">${state.selecionadas.has(q.id) ? "✓" : ""}</div>
+              <div style="flex:1; min-width:0;">
+                <div class="row" style="align-items:flex-start; gap:8px;">
+                  <div style="min-width:0;">
+                    <div class="mono muted" style="font-size:10.5px;">${q.disciplina}</div>
+                    <div style="font-weight:600; font-size:13.5px;">${q.assunto}</div>
+                  </div>
+                  <div class="dots" style="flex-shrink:0;">${[1,2,3,4,5].map(i => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
+                </div>
+                <div class="mono muted" style="font-size:11px; margin-top:6px; line-height:1.5; max-height:54px; overflow:hidden;">${formatarEnunciado(q.preview && q.preview.enunciado ? q.preview.enunciado : q.enunciado)}</div>
               </div>
-              <div class="dots">${[1,2,3,4,5].map(i => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
             </div>
           `).join("")}
           ${aplicarFiltro(questoes, state.filtroMontar).length === 0 ? `<div class="card muted" style="text-align:center; padding:24px; font-size:12.5px;">${corners()}Nenhuma questão com esse filtro.</div>` : ""}
