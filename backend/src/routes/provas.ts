@@ -299,6 +299,30 @@ provasRouter.put("/:id/prazo", asyncHandler(async (req, res) => {
   res.json({ id: atualizado.id, prazoFinal: atualizado.prazoFinal });
 }));
 
+// PUT /api/provas-mestre/:id/valor   body: { valor: number }
+// Edita quantos pontos o TDE vale, mesmo já publicado e com alunos que já responderam.
+// As notas são recalculadas sozinhas: o banco guarda acertos/total, e a nota sai de
+// (acertos / total) * valor na hora de exibir — então nenhuma resposta é alterada aqui.
+provasRouter.put("/:id/valor", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { valor } = req.body as { valor?: number | string };
+
+  const numero = Number(valor);
+  if (!isFinite(numero) || numero <= 0) {
+    return res.status(400).json({ erro: "Informe um valor numérico maior que zero." });
+  }
+
+  const provaMestre = await prisma.provaMestre.findUnique({ where: { id } });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
+
+  const atualizado = await prisma.provaMestre.update({
+    where: { id },
+    data: { valor: numero },
+  });
+
+  res.json({ id: atualizado.id, valor: atualizado.valor });
+}));
+
 // DELETE /api/provas-mestre/:id -> apaga o TDE e tudo que depende dele
 // (provas individuais geradas, respostas dos alunos)
 provasRouter.delete("/:id", asyncHandler(async (req, res) => {
