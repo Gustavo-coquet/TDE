@@ -330,6 +330,7 @@ async function renderTurmaDetalhe() {
             <div class="row" style="margin-top:6px;">
               <span class="muted" style="font-size:11.5px;">${p.totalQuestoes} questões · vale ${p.valor} pts · ${p.totalAlunos} alunos${p.prazoFinal ? ` · prazo até ${new Date(p.prazoFinal).toLocaleDateString("pt-BR")}` : ""}</span>
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-valor-tde="${p.id}" data-valor-atual="${p.valor}">Editar pontos</button>
                 <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-prazo-tde="${p.id}" data-prazo-atual="${p.prazoFinal || ""}">Editar prazo</button>
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-add-alunos-tde="${p.id}">+ Alunos novos</button>` : ""}
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-links-tde="${p.id}">Ver links</button>` : ""}
@@ -337,6 +338,7 @@ async function renderTurmaDetalhe() {
                 <button class="btn danger" style="font-size:11px; padding:4px 8px;" data-apagar-tde="${p.id}">Apagar</button>
               </div>
             </div>
+            <div id="valor-tde-${p.id}"></div>
             <div id="prazo-tde-${p.id}"></div>
             <div id="add-alunos-tde-${p.id}"></div>
             <div id="links-tde-${p.id}"></div>
@@ -419,6 +421,43 @@ async function renderTurmaDetalhe() {
 
   content.querySelectorAll("[data-ver-resultado-tde]").forEach((el) => {
     el.addEventListener("click", () => setView("resultados", { provaAtualId: el.dataset.verResultadoTde }));
+  });
+
+  content.querySelectorAll("[data-editar-valor-tde]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const provaId = el.dataset.editarValorTde;
+      const valorAtual = el.dataset.valorAtual;
+      const alvo = document.getElementById(`valor-tde-${provaId}`);
+      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+
+      alvo.innerHTML = `
+        <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label class="mono muted" style="font-size:11px;">Vale quantos pontos:</label>
+          <input type="number" step="0.01" min="0.01" id="input-valor-${provaId}" value="${valorAtual}" style="background:var(--surface); border:1px solid var(--line); color:var(--ink); padding:5px 8px; font-size:12px; width:100px;" />
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-salvar-valor="${provaId}">Salvar</button>
+          <span class="muted" style="font-size:11px; width:100%;">As notas de quem já respondeu são recalculadas automaticamente — nenhuma resposta é alterada.</span>
+          <span id="erro-valor-${provaId}" style="width:100%;"></span>
+        </div>
+      `;
+
+      document.querySelector(`[data-salvar-valor="${provaId}"]`).addEventListener("click", async (ev) => {
+        const valor = document.getElementById(`input-valor-${provaId}`).value;
+        const erroEl = document.getElementById(`erro-valor-${provaId}`);
+        erroEl.innerHTML = "";
+        if (!valor || Number(valor) <= 0) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">Informe um valor maior que zero.</div>`;
+          return;
+        }
+        ev.target.disabled = true;
+        try {
+          await api(`/provas-mestre/${provaId}/valor`, { method: "PUT", body: JSON.stringify({ valor: Number(valor) }) });
+          renderTurmaDetalhe();
+        } catch (e) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+          ev.target.disabled = false;
+        }
+      });
+    });
   });
 
   content.querySelectorAll("[data-editar-prazo-tde]").forEach((el) => {
