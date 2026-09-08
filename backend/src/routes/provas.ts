@@ -155,14 +155,24 @@ provasRouter.get("/:id/resultados", asyncHandler(async (req, res) => {
     const status = finalizadas.length > 0 ? "finalizada" : (emAndamento ? "em_andamento" : "gerada");
     const respondidas = tentativas.reduce((acc, t) => acc + t.questoes.filter((q) => q.respostaAlunoLetra !== null).length, 0);
 
+    // nota lançada manualmente pelo professor sobrepõe a calculada. Vale mesmo se o aluno
+    // não finalizou (ex.: fez em outra data, teve problema técnico, entregou no papel...).
+    const comNotaManual = tentativas.find((t) => t.notaManual !== null && t.notaManual !== undefined);
+    const notaCalculada = melhor ? +melhorNota.toFixed(2) : null;
+    const notaFinal = comNotaManual ? comNotaManual.notaManual! : notaCalculada;
+
     return {
       alunoId: primeira.alunoId,
+      provaIndividualId: (comNotaManual ?? melhor ?? primeira).id, // usado pra lançar/remover a nota manual
       alunoNome: primeira.aluno.nome,
       matricula: primeira.aluno.matricula,
       status,
       acertos: melhor?.acertos ?? null,
       total: melhor?.total ?? null,
-      nota: melhor ? +melhorNota.toFixed(2) : null,
+      nota: notaFinal,
+      notaCalculada,
+      notaManual: comNotaManual ? comNotaManual.notaManual : null,
+      motivoNotaManual: comNotaManual ? comNotaManual.motivoNotaManual : null,
       tentativasFeitas: finalizadas.length,
       respondidas,
     };
@@ -321,6 +331,57 @@ provasRouter.put("/:id/valor", asyncHandler(async (req, res) => {
   });
 
   res.json({ id: atualizado.id, valor: atualizado.valor });
+}));
+
+// PUT /api/provas-mestre/:id/nota-manual   body: { alunoId, nota, motivo }
+// Lança uma nota manual para um aluno neste TDE, sobrepondo a nota calculada.
+// Envie nota = null para remover o ajuste e voltar à nota automática.
+// Nenhuma resposta do aluno é alterada — a nota calculada continua guardada e visível.
+provasRouter.put("/:id/nota-manual", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { alunoId, nota, motivo } = req.body as { alunoId?: string; nota?: number | null; motivo?: string };
+
+  if (!alunoId) return res.status(400).json({ erro: "alunoId é obrigatório." });
+
+  const provaMestre = await prisma.provaMestre.findUnique({ where: { id } });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
+
+  const tentativas = await prisma.provaIndividual.findMany({
+    where: { provaMestreId: id, alunoId },
+    orderBy: { tentativa: "asc" },
+  });
+  if (tentativas.length === 0) {
+    return res.status(404).json({ erro: "Este aluno não tem prova gerada neste TDE." });
+  }
+
+  // remover o ajuste: limpa em todas as tentativas do aluno
+  if (nota === null || nota === undefined || (nota as any) === "") {
+    await prisma.provaIndividual.updateMany({
+      where: { provaMestreId: id, alunoId },
+      data: { notaManual: null, motivoNotaManual: null },
+    });
+    return res.json({ ok: true, removida: true });
+  }
+
+  const numero = Number(nota);
+  if (!isFinite(numero) || numero < 0) {
+    return res.status(400).json({ erro: "Informe uma nota numérica maior ou igual a zero." });
+  }
+  if (numero > provaMestre.valor) {
+    return res.status(400).json({ erro: `A nota não pode passar de ${provaMestre.valor} (valor do TDE).` });
+  }
+
+  // grava na primeira tentativa e limpa das demais, pra existir só um ajuste por aluno
+  await prisma.provaIndividual.updateMany({
+    where: { provaMestreId: id, alunoId },
+    data: { notaManual: null, motivoNotaManual: null },
+  });
+  await prisma.provaIndividual.update({
+    where: { id: tentativas[0].id },
+    data: { notaManual: numero, motivoNotaManual: motivo || null },
+  });
+
+  res.json({ ok: true, nota: numero });
 }));
 
 // DELETE /api/provas-mestre/:id -> apaga o TDE e tudo que depende dele

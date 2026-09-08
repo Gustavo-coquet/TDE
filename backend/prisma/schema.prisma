@@ -83,6 +83,8 @@ model ProvaIndividual {
   finalizadaEm  DateTime?
   acertos       Int?
   total         Int?
+  notaManual      Float?    // se preenchida, sobrepõe a nota calculada (ajuste do professor)
+  motivoNotaManual String?  // anotação opcional do porquê do ajuste
 
   questoes      ProvaIndividualQuestao[]
 

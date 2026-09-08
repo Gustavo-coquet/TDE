@@ -1305,12 +1305,19 @@ async function renderResultados() {
         <button class="btn subtle" id="btn-exportar-excel" style="font-size:11px; padding:5px 10px;">Exportar Excel</button>
       </div>
       ${r.alunos.map((a, i) => `
-        <div class="row" style="padding:10px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}">
-          <span style="font-size:13.5px;">${a.alunoNome}</span>
-          <span class="mono muted" style="font-size:12px;">${a.status === 'finalizada' ? `${a.acertos}/${a.total} acertos${a.tentativasFeitas>1?` (${a.tentativasFeitas} tentativas)`:''}` : a.status}</span>
-          <span style="font-family:var(--f-display); font-weight:700; font-size:15px; width:50px; text-align:right; color:${a.nota===null?'var(--ink-faint)':(a.nota>=r.valor*0.6?'var(--green)':'var(--red)')};">
-            ${a.nota !== null ? formatarBR(+a.nota.toFixed(2)) : "—"}
-          </span>
+        <div style="padding:10px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}">
+          <div class="row">
+            <span style="font-size:13.5px;">${a.alunoNome}${a.notaManual !== null ? ` <span class="pill amber" style="font-size:9.5px; padding:1px 6px;">nota ajustada</span>` : ""}</span>
+            <span class="mono muted" style="font-size:12px;">${a.status === 'finalizada' ? `${a.acertos}/${a.total} acertos${a.tentativasFeitas>1?` (${a.tentativasFeitas} tentativas)`:''}` : a.status}</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-family:var(--f-display); font-weight:700; font-size:15px; width:50px; text-align:right; color:${a.nota===null?'var(--ink-faint)':(a.nota>=r.valor*0.6?'var(--green)':'var(--red)')};">
+                ${a.nota !== null ? formatarBR(+a.nota.toFixed(2)) : "—"}
+              </span>
+              <button class="btn subtle" style="font-size:10.5px; padding:3px 8px;" data-editar-nota="${a.alunoId}" data-nota-atual="${a.nota !== null ? a.nota : ""}" data-tem-manual="${a.notaManual !== null}">Alterar</button>
+            </div>
+          </div>
+          ${a.notaManual !== null && a.motivoNotaManual ? `<div class="mono muted" style="font-size:10.5px; margin-top:4px;">motivo: ${a.motivoNotaManual}</div>` : ""}
+          <div id="nota-${a.alunoId}"></div>
         </div>
       `).join("")}
     </div>
@@ -1321,6 +1328,64 @@ async function renderResultados() {
     renderResultados();
   });
 
+  content.querySelectorAll("[data-editar-nota]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const alunoId = el.dataset.editarNota;
+      const notaAtual = el.dataset.notaAtual;
+      const temManual = el.dataset.temManual === "true";
+      const alvo = document.getElementById(`nota-${alunoId}`);
+      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+
+      alvo.innerHTML = `
+        <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label class="mono muted" style="font-size:11px;">Nota:</label>
+          <input type="number" step="0.01" min="0" max="${r.valor}" id="input-nota-${alunoId}" value="${notaAtual}" style="background:var(--surface); border:1px solid var(--line); color:var(--ink); padding:5px 8px; font-size:12px; width:90px;" />
+          <input id="input-motivo-${alunoId}" placeholder="motivo (opcional)" style="background:var(--surface); border:1px solid var(--line); color:var(--ink); padding:5px 8px; font-size:12px; flex:1; min-width:160px;" />
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-salvar-nota="${alunoId}">Salvar</button>
+          ${temManual ? `<button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-remover-nota="${alunoId}">Voltar à nota automática</button>` : ""}
+          <span class="muted" style="font-size:10.5px; width:100%;">A nota lançada aqui substitui a calculada. As respostas do aluno não são alteradas.</span>
+          <span id="erro-nota-${alunoId}" style="width:100%;"></span>
+        </div>
+      `;
+
+      document.querySelector(`[data-salvar-nota="${alunoId}"]`).addEventListener("click", async (ev) => {
+        const nota = document.getElementById(`input-nota-${alunoId}`).value;
+        const motivo = document.getElementById(`input-motivo-${alunoId}`).value.trim();
+        const erroEl = document.getElementById(`erro-nota-${alunoId}`);
+        erroEl.innerHTML = "";
+        if (nota === "" || Number(nota) < 0) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">Informe uma nota válida.</div>`;
+          return;
+        }
+        ev.target.disabled = true;
+        try {
+          await api(`/provas-mestre/${state.provaAtualId}/nota-manual`, {
+            method: "PUT",
+            body: JSON.stringify({ alunoId, nota: Number(nota), motivo }),
+          });
+          renderResultados();
+        } catch (e) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+          ev.target.disabled = false;
+        }
+      });
+
+      document.querySelector(`[data-remover-nota="${alunoId}"]`)?.addEventListener("click", async (ev) => {
+        ev.target.disabled = true;
+        try {
+          await api(`/provas-mestre/${state.provaAtualId}/nota-manual`, {
+            method: "PUT",
+            body: JSON.stringify({ alunoId, nota: null }),
+          });
+          renderResultados();
+        } catch (e) {
+          document.getElementById(`erro-nota-${alunoId}`).innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+          ev.target.disabled = false;
+        }
+      });
+    });
+  });
+
   document.getElementById("btn-exportar-excel").addEventListener("click", () => {
     const linhas = r.alunos.map((a) => ({
       "Aluno": a.alunoNome,
@@ -1329,10 +1394,11 @@ async function renderResultados() {
       "Valor do TDE": formatarBR(r.valor),
       "Acertos": a.status === "finalizada" ? `${a.acertos}/${a.total}` : "",
       "Tentativas": a.tentativasFeitas,
+      "Nota ajustada?": a.notaManual !== null ? `Sim${a.motivoNotaManual ? " — " + a.motivoNotaManual : ""}` : "",
       "Situação": a.nota === null ? "Não finalizou" : (a.nota >= r.valor * 0.6 ? "Aprovado" : "Reprovado"),
     }));
     const ws = XLSX.utils.json_to_sheet(linhas);
-    ws["!cols"] = [{ wch: 32 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+    ws["!cols"] = [{ wch: 32 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 14 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Notas");
     const nomeArquivo = `${provaSel.turmaNome} - ${provaSel.titulo}`.replace(/[^\w\s-]/g, "").trim() + ".xlsx";
