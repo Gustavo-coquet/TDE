@@ -144,10 +144,26 @@ export function gerarAlternativasParaQuestao(
   rng: Rng
 ): AlternativaGerada[] {
   const etapasSaida = etapas.filter((e) => e.saida);
-  const saidasNumericas = etapasSaida
-    .filter((e) => typeof valores[e.nome] === "number")
-    .map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] as number, decimais: e.decimais, notacaoCientifica: e.notacaoCientifica }));
   const etapasTexto = etapasSaida.filter((e) => typeof valores[e.nome] === "string");
+  const numericas = etapasSaida.filter((e) => typeof valores[e.nome] === "number");
+
+  // Uma etapa de saída que usa OUTRA etapa de saída na sua fórmula é "derivada"
+  // (ex.: o módulo |M| depende de Mx, My, Mz). Essas NÃO podem ser sorteadas de forma
+  // independente: se fossem, apareceria um módulo que não corresponde às componentes
+  // mostradas na mesma alternativa — e a única opção coerente seria a correta,
+  // entregando a resposta. Por isso elas são RECALCULADAS a partir dos valores
+  // (certos ou errados) de cada alternativa.
+  const nomesSaida = new Set(etapasSaida.map((e) => e.nome));
+  const ehDerivada = (e: EtapaDb) =>
+    Array.from(nomesSaida).some((nome) => nome !== e.nome && referenciaVariavel(e.formula, nome));
+
+  const derivadas = numericas.filter(ehDerivada);
+  const independentes = numericas.filter((e) => !ehDerivada(e));
+
+  const saidasNumericas = independentes.map((e) => ({
+    nome: e.nome, unidade: e.unidade, valor: valores[e.nome] as number,
+    decimais: e.decimais, notacaoCientifica: e.notacaoCientifica,
+  }));
 
   // Caso especial: a resposta é SÓ texto (ex.: "2 < x < 7", "x < 3 ou x > 8"), sem nenhum
   // campo numérico de saída. Aqui não há número visível pra variar, então as 8 alternativas
@@ -160,27 +176,37 @@ export function gerarAlternativasParaQuestao(
 
   const alternativas = gerarAlternativasMulti(saidasNumericas, rng);
 
-  if (etapasTexto.length > 0) {
+  // recalcula, em cada alternativa, os campos derivados e os de texto usando os valores daquela opção
+  const paraRecalcular = [...derivadas, ...etapasTexto];
+  if (paraRecalcular.length > 0) {
     for (const alt of alternativas) {
-      // recria o "contexto" dessa alternativa: os mesmos valores de sempre, mas com os
-      // campos numéricos trocados pelos valores (certos ou errados) DESSA alternativa
       const contexto: Record<string, Valor> = { ...valores };
       for (const campo of alt.campos) contexto[campo.nome] = campo.valor;
 
-      for (const et of etapasTexto) {
-        let texto: string;
+      for (const et of paraRecalcular) {
+        let valor: Valor;
         try {
-          const recalculado = avaliarExpressao(et.formula, contexto);
-          texto = String(recalculado);
+          const bruto = avaliarExpressao(et.formula, contexto);
+          valor = typeof bruto === "number" && !et.notacaoCientifica ? roundTo(bruto, et.decimais) : bruto;
         } catch {
-          texto = String(valores[et.nome]); // fallback: não deveria acontecer, mas evita quebrar a prova
+          valor = valores[et.nome]; // fallback: mantém o valor original em vez de quebrar a prova
         }
-        alt.campos.push({ nome: et.nome, unidade: et.unidade, valor: texto });
+        contexto[et.nome] = valor;
+        alt.campos.push({
+          nome: et.nome, unidade: et.unidade, valor,
+          decimais: et.decimais, notacaoCientifica: et.notacaoCientifica,
+        });
       }
     }
   }
 
   return alternativas;
+}
+
+/** true se a fórmula usa a variável informada (respeitando limites de palavra, pra "M" não casar dentro de "Mx") */
+function referenciaVariavel(formula: string, nome: string): boolean {
+  const escapado = nome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-zΑ-Ωα-ω0-9_])${escapado}([^A-Za-zΑ-Ωα-ω0-9_]|$)`).test(formula);
 }
 
 /**
