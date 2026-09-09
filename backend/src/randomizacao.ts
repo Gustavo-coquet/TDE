@@ -68,8 +68,9 @@ export function gerarProvaIndividual(
   const ordemEmbaralhada = shuffle([...questoes], rng);
 
   const questoesGeradas: QuestaoIndividualGerada[] = ordemEmbaralhada.map((q, idx) => {
-    const valores = resolverEtapas(q.variaveis, q.etapas, rng);
-    const enunciadoFinal = montarEnunciado(q.enunciado, valores);
+    const valores = resolverEtapas(q.variaveis, q.etapas, rng); // precisão total
+    const exibicao = valoresParaExibicao(valores, q.etapas);    // só para mostrar na tela
+    const enunciadoFinal = montarEnunciado(q.enunciado, exibicao);
     const alternativas = gerarAlternativasParaQuestao(q.etapas, valores, rng);
 
     return {
@@ -85,23 +86,43 @@ export function gerarProvaIndividual(
   return { seed: seedStr, questoes: questoesGeradas };
 }
 
-/** Sorteia as variáveis de entrada e resolve cada etapa em ordem, podendo usar tudo que veio antes. */
+/**
+ * Sorteia as variáveis de entrada e resolve cada etapa em ordem, podendo usar tudo que veio antes.
+ *
+ * IMPORTANTE — precisão igual à do Excel: o valor guardado aqui é SEMPRE o resultado
+ * com precisão total. O campo "decimais" de cada etapa passou a valer só para EXIBIÇÃO
+ * (ver valoresParaExibicao), nunca para o cálculo das etapas seguintes.
+ *
+ * Antes, o valor era arredondado aqui e o valor arredondado alimentava a próxima etapa,
+ * o que causava arredondamento em cascata: uma etapa intermediária pequena (ex.: J =
+ * 0,00131 m/m com "decimais 2") virava 0,00 e zerava todo o resto da conta.
+ *
+ * As VARIÁVEIS DE ENTRADA continuam arredondadas na geração (gerarValores), e isso é
+ * proposital: elas são o dado que o aluno lê no enunciado, então o número exibido tem
+ * que ser exatamente o número usado na conta.
+ */
 export function resolverEtapas(variaveis: VariavelDb[], etapas: EtapaDb[], rng: Rng): Record<string, Valor> {
   const valores: Record<string, Valor> = gerarValores(variaveis, rng);
   for (const etapa of etapas) {
-    const bruto = avaliarExpressao(etapa.formula, valores);
-    if (typeof bruto !== "number") {
-      valores[etapa.nome] = bruto;
-    } else if (etapa.notacaoCientifica) {
-      // em notação científica o valor NÃO é arredondado aqui: um resultado como 0,000032
-      // viraria zero se arredondado a 4 casas. As casas decimais passam a valer só pra
-      // mantissa, na hora de exibir (ex.: 3,2000 × 10⁻⁵).
-      valores[etapa.nome] = bruto;
-    } else {
-      valores[etapa.nome] = roundTo(bruto, etapa.decimais);
-    }
+    valores[etapa.nome] = avaliarExpressao(etapa.formula, valores);
   }
   return valores;
+}
+
+/**
+ * Devolve uma cópia dos valores arredondada para EXIBIÇÃO, respeitando o "decimais" de
+ * cada etapa. Usada no enunciado e nas alternativas — o cálculo em si nunca passa por aqui.
+ * Variáveis de entrada não aparecem em "etapas" e são copiadas como estão (já vêm
+ * arredondadas da geração).
+ */
+export function valoresParaExibicao(valores: Record<string, Valor>, etapas: EtapaDb[]): Record<string, Valor> {
+  const out: Record<string, Valor> = { ...valores };
+  for (const etapa of etapas) {
+    const v = out[etapa.nome];
+    // notação científica não é arredondada aqui: as casas viram casas da mantissa na hora de exibir
+    if (typeof v === "number" && !etapa.notacaoCientifica) out[etapa.nome] = roundTo(v, etapa.decimais);
+  }
+  return out;
 }
 
 export function gerarValores(variaveis: VariavelDb[], rng: Rng): Record<string, number> {
@@ -160,8 +181,13 @@ export function gerarAlternativasParaQuestao(
   const derivadas = numericas.filter(ehDerivada);
   const independentes = numericas.filter((e) => !ehDerivada(e));
 
+  // o valor CORRETO entra aqui já arredondado para exibição: os distratores também são
+  // arredondados com as mesmas casas, então a alternativa certa não pode aparecer com mais
+  // casas que as outras (isso entregaria a resposta). O cálculo em si já foi feito com
+  // precisão total lá em resolverEtapas.
   const saidasNumericas = independentes.map((e) => ({
-    nome: e.nome, unidade: e.unidade, valor: valores[e.nome] as number,
+    nome: e.nome, unidade: e.unidade,
+    valor: e.notacaoCientifica ? (valores[e.nome] as number) : roundTo(valores[e.nome] as number, e.decimais),
     decimais: e.decimais, notacaoCientifica: e.notacaoCientifica,
   }));
 
@@ -185,12 +211,14 @@ export function gerarAlternativasParaQuestao(
 
       for (const et of paraRecalcular) {
         let valor: Valor;
-        try {
-          const bruto = avaliarExpressao(et.formula, contexto);
-          valor = typeof bruto === "number" && !et.notacaoCientifica ? roundTo(bruto, et.decimais) : bruto;
-        } catch {
-          valor = valores[et.nome]; // fallback: mantém o valor original em vez de quebrar a prova
-        }
+        // na alternativa CORRETA o campo derivado vem do cálculo de precisão total (só
+        // arredondado para exibir) — é o valor que o aluno obtém resolvendo a questão.
+        // Nas erradas ele é recalculado a partir dos números daquela alternativa, para
+        // que a opção continue internamente coerente.
+        const bruto = alt.correta
+          ? valores[et.nome]
+          : (() => { try { return avaliarExpressao(et.formula, contexto); } catch { return valores[et.nome]; } })();
+        valor = typeof bruto === "number" && !et.notacaoCientifica ? roundTo(bruto, et.decimais) : bruto;
         contexto[et.nome] = valor;
         alt.campos.push({
           nome: et.nome, unidade: et.unidade, valor,
