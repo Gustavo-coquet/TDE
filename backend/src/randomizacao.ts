@@ -211,14 +211,19 @@ export function gerarAlternativasParaQuestao(
 
       for (const et of paraRecalcular) {
         let valor: Valor;
-        // na alternativa CORRETA o campo derivado vem do cálculo de precisão total (só
-        // arredondado para exibir) — é o valor que o aluno obtém resolvendo a questão.
-        // Nas erradas ele é recalculado a partir dos números daquela alternativa, para
-        // que a opção continue internamente coerente.
-        const bruto = alt.correta
-          ? valores[et.nome]
-          : (() => { try { return avaliarExpressao(et.formula, contexto); } catch { return valores[et.nome]; } })();
-        valor = typeof bruto === "number" && !et.notacaoCientifica ? roundTo(bruto, et.decimais) : bruto;
+        // O campo derivado é SEMPRE recalculado a partir dos valores EXIBIDOS na própria
+        // alternativa — inclusive na correta. Isso é essencial: o aluno lê "hf_p = 0,70" e
+        // "hf_r = 0,61" na tela e faz H - 0,70 - 0,61. Se a correta usasse a precisão total,
+        // o resultado dela poderia fechar em 6,68 enquanto o aluno acha 6,69 — e ele marcaria
+        // uma alternativa errada tendo resolvido tudo certo. Recalculando dos valores exibidos,
+        // cada linha fica internamente coerente até o último dígito.
+        try {
+          const bruto = avaliarExpressao(et.formula, contexto);
+          valor = typeof bruto === "number" && !et.notacaoCientifica ? roundTo(bruto, et.decimais) : bruto;
+        } catch {
+          const bruto = valores[et.nome]; // fallback: não quebra a prova
+          valor = typeof bruto === "number" && !et.notacaoCientifica ? roundTo(bruto, et.decimais) : bruto;
+        }
         contexto[et.nome] = valor;
         alt.campos.push({
           nome: et.nome, unidade: et.unidade, valor,
