@@ -406,16 +406,34 @@ export function gerarAlternativasMulti(
     const jaExiste = tuplas.some((t) => t.every((v, i) => v === tupla[i]));
     if (!igualCorreta && !jaExiste) tuplas.push(tupla);
   }
-  // fallback caso não tenha conseguido gerar tuplas suficientes distintas (campos com pouca variação possível)
+  // Fallback para quando não deu pra gerar tuplas distintas suficientes (respostas inteiras
+  // pequenas, por exemplo, têm poucos distratores possíveis).
+  //
+  // ATENÇÃO: este bloco JAMAIS pode devolver uma tupla igual à correta nem repetir uma já
+  // existente. Se isso acontece, a prova fica com duas alternativas idênticas e só uma marcada
+  // como certa — o aluno que escolher a outra é reprovado tendo acertado. Por isso cada tupla
+  // é verificada e, se colidir, recebe um empurrão crescente até ficar única.
+  let empurrao = 1;
   while (tuplas.length < TOTAL_ALTERNATIVAS) {
-    const tupla = saidas.map((s, i) => {
-      const pool = pools[i];
-      const base = pool.length ? pool[rng.int(0, pool.length - 1)] : s.valor;
-      const escala = Math.abs(s.valor) || 1;
-      const bruto = base + escala * (rng.int(1, 25) / 100); // ajuste proporcional, não soma fixa
-      return s.notacaoCientifica ? bruto : roundTo(bruto, casas[i]);
-    });
+    let tupla: number[] = [];
+    let tentativa = 0;
+    do {
+      tupla = saidas.map((s, i) => {
+        const pool = pools[i];
+        const base = pool.length ? pool[rng.int(0, pool.length - 1)] : s.valor;
+        const escala = Math.abs(s.valor) || 1;
+        // o passo mínimo respeita as casas decimais: com 0 casas, anda de 1 em 1
+        const passo = Math.pow(10, -casas[i]);
+        const bruto = base + escala * (rng.int(1, 25) / 100) + empurrao * passo * tentativa;
+        return s.notacaoCientifica ? bruto : roundTo(bruto, casas[i]);
+      });
+      tentativa++;
+    } while (
+      tentativa < 200 &&
+      (tupla.every((v, i) => v === tuplaCorreta[i]) || tuplas.some((t) => t.every((v, i) => v === tupla[i])))
+    );
     tuplas.push(tupla);
+    empurrao++;
   }
 
   const arr = tuplas.map((tupla) => ({
