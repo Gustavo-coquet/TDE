@@ -813,13 +813,13 @@ function renderFormNovaQuestao(container) {
       <div class="field">
         <label>Formato customizado da resposta (opcional — pra vetores, notação especial, etc.)</label>
         <input id="nq-formato-resposta" value="${attr(dados.formatoResposta || "")}" placeholder="Ex: F = ({Fx}î + {Fz}k̂) N" class="mono" />
+        <div class="hint">Use {NOME} pra referenciar o valor de uma etapa marcada como "é resposta". Se deixar vazio, mostra do jeito padrão: "Fx = 5 N | Fz = 3 N".</div>
       </div>
 
       <div class="field">
         <label>Grupo de variáveis (opcional — pra encadear questões sobre a mesma peça)</label>
         <input id="nq-grupo" value="${attr(dados.grupoVariaveis || "")}" placeholder="Ex: figura-ancora" class="mono" />
         <div class="hint">Questões com o MESMO grupo, dentro de um mesmo TDE, recebem os mesmos valores sorteados nas variáveis de mesmo nome — então falam da mesma peça. Útil quando a 2ª questão precisa do resultado da 1ª. Elas também ficam sempre juntas e na ordem definida, mesmo no modo aleatório. Deixe vazio para a questão ser independente.</div>
-        <div class="hint">Use {NOME} pra referenciar o valor de uma etapa marcada como "é resposta". Se deixar vazio, mostra do jeito padrão: "Fx = 5 N | Fz = 3 N".</div>
       </div>
 
       <div style="display:flex; gap:10px; margin-top:6px;">
