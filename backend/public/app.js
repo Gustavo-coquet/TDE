@@ -681,6 +681,7 @@ async function renderBanco(mostrarForm) {
           <div class="divider mono muted" style="font-size:11px;">Cada aluno recebe outros valores dentro das mesmas faixas — mesmo raciocínio, mesma dificuldade.</div>
           <div style="margin-top:12px; display:flex; gap:8px;">
             <button class="btn subtle" data-editar="${q.id}">Editar questão</button>
+            <button class="btn subtle" data-duplicar="${q.id}">Duplicar</button>
             <button class="btn danger" data-remover="${q.id}">Remover questão</button>
           </div>
         </div>
@@ -688,6 +689,24 @@ async function renderBanco(mostrarForm) {
       document.querySelector("[data-editar]")?.addEventListener("click", () => {
         state.editandoQuestaoId = q.id;
         state.editandoQuestaoDados = { disciplina: q.disciplina, assunto: q.assunto, dificuldade: q.dificuldade, enunciado: q.enunciado, formatoResposta: q.formatoResposta, grupoVariaveis: q.grupoVariaveis };
+        state.novaQuestaoVars = JSON.parse(JSON.stringify(q.variaveis));
+        state.novaQuestaoEtapas = JSON.parse(JSON.stringify(q.etapas));
+        state.novaQuestaoImagem = q.imagem || null;
+        renderBanco(true);
+      });
+      // Duplicar: abre o formulário já preenchido com esta questão, porém como questão NOVA.
+      // Serve pra encadear questões sobre a mesma peça sem redigitar as variáveis uma a uma —
+      // basta ajustar o enunciado e as etapas de cálculo e salvar.
+      document.querySelector("[data-duplicar]")?.addEventListener("click", () => {
+        state.editandoQuestaoId = null; // null = salvar cria uma questão nova, não sobrescreve esta
+        state.editandoQuestaoDados = {
+          disciplina: q.disciplina,
+          assunto: q.assunto,
+          dificuldade: q.dificuldade,
+          enunciado: q.enunciado,
+          formatoResposta: q.formatoResposta,
+          grupoVariaveis: q.grupoVariaveis,
+        };
         state.novaQuestaoVars = JSON.parse(JSON.stringify(q.variaveis));
         state.novaQuestaoEtapas = JSON.parse(JSON.stringify(q.etapas));
         state.novaQuestaoImagem = q.imagem || null;
@@ -748,7 +767,8 @@ function renderFormNovaQuestao(container) {
   container.innerHTML = `
     <div class="card accent-teal">
       ${corners()}
-      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px;">${editando ? "Editar questão" : "Nova questão parametrizada"}</div>
+      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px;">${editando ? "Editar questão" : (state.editandoQuestaoDados ? "Nova questão (cópia)" : "Nova questão parametrizada")}</div>
+      ${!editando && state.editandoQuestaoDados ? `<div class="hint" style="margin:-8px 0 14px;">Cópia carregada: variáveis, etapas e imagem vieram da questão original. Ajuste o que precisar — ao salvar, uma questão NOVA será criada e a original continua intacta.</div>` : ""}
       <div id="erro-questao"></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
         <div class="field">
