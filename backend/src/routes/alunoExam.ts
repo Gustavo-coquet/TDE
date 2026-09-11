@@ -108,6 +108,7 @@ alunoExamRouter.post("/:provaMestreId/:token/nova-tentativa", asyncHandler(async
     enunciado: pmq.questao.enunciado,
     variaveis: pmq.questao.variaveis as any,
     etapas: pmq.questao.etapas as any,
+    grupoVariaveis: pmq.questao.grupoVariaveis,
   }));
 
   // seed diferente da 1ª tentativa, pra sortear outros valores — mas continua determinística/auditável

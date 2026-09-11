@@ -88,6 +88,7 @@ provasRouter.post("/:id/publicar", asyncHandler(async (req, res) => {
     enunciado: pmq.questao.enunciado,
     variaveis: pmq.questao.variaveis as any,
     etapas: pmq.questao.etapas as any,
+    grupoVariaveis: pmq.questao.grupoVariaveis,
   }));
 
   const provasCriadas: { alunoId: string; alunoNome: string; qrToken: string }[] = [];
@@ -265,6 +266,7 @@ provasRouter.post("/:id/adicionar-alunos", asyncHandler(async (req, res) => {
     enunciado: pmq.questao.enunciado,
     variaveis: pmq.questao.variaveis as any,
     etapas: pmq.questao.etapas as any,
+    grupoVariaveis: pmq.questao.grupoVariaveis,
   }));
 
   const provasCriadas: { alunoId: string; alunoNome: string; qrToken: string }[] = [];

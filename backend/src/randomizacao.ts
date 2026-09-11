@@ -22,6 +22,7 @@ export interface QuestaoDb {
   enunciado: string;
   variaveis: VariavelDb[];
   etapas: EtapaDb[];
+  grupoVariaveis?: string | null; // questões do mesmo grupo compartilham os valores sorteados
 }
 
 export interface CampoAlternativa {
@@ -70,10 +71,16 @@ export function gerarProvaIndividual(
   // Quando é fixa, o array já chega ordenado pelo campo "ordem" de ProvaMestreQuestao.
   // Importante: isto muda SÓ a ordem das questões. Os valores numéricos de cada questão e
   // a ordem das alternativas continuam sorteados por aluno nos dois modos.
-  const ordemFinal = embaralharQuestoes ? shuffle([...questoes], rng) : [...questoes];
+  const ordemFinal = embaralharQuestoes ? embaralharPreservandoGrupos(questoes, rng) : [...questoes];
+
+  // Valores já sorteados de cada grupo. A primeira questão do grupo sorteia; as seguintes
+  // reaproveitam, para que todas falem da MESMA peça (mesmo A, B, C...).
+  const valoresPorGrupo: Record<string, Record<string, number>> = {};
 
   const questoesGeradas: QuestaoIndividualGerada[] = ordemFinal.map((q, idx) => {
-    const valores = resolverEtapas(q.variaveis, q.etapas, rng); // precisão total
+    const grupo = q.grupoVariaveis || null;
+    if (grupo && !valoresPorGrupo[grupo]) valoresPorGrupo[grupo] = {};
+    const valores = resolverEtapas(q.variaveis, q.etapas, rng, grupo ? valoresPorGrupo[grupo] : undefined); // precisão total
     const exibicao = valoresParaExibicao(valores, q.etapas);    // só para mostrar na tela
     const enunciadoFinal = montarEnunciado(q.enunciado, exibicao);
     const alternativas = gerarAlternativasParaQuestao(q.etapas, valores, rng);
@@ -106,8 +113,8 @@ export function gerarProvaIndividual(
  * proposital: elas são o dado que o aluno lê no enunciado, então o número exibido tem
  * que ser exatamente o número usado na conta.
  */
-export function resolverEtapas(variaveis: VariavelDb[], etapas: EtapaDb[], rng: Rng): Record<string, Valor> {
-  const valores: Record<string, Valor> = gerarValores(variaveis, rng);
+export function resolverEtapas(variaveis: VariavelDb[], etapas: EtapaDb[], rng: Rng, compartilhados?: Record<string, number>): Record<string, Valor> {
+  const valores: Record<string, Valor> = gerarValores(variaveis, rng, compartilhados);
   for (const etapa of etapas) {
     valores[etapa.nome] = avaliarExpressao(etapa.formula, valores);
   }
@@ -130,12 +137,48 @@ export function valoresParaExibicao(valores: Record<string, Valor>, etapas: Etap
   return out;
 }
 
-export function gerarValores(variaveis: VariavelDb[], rng: Rng): Record<string, number> {
+/**
+ * Sorteia as variáveis de entrada.
+ *
+ * Se "compartilhados" for informado (questões vinculadas por grupo), uma variável que já
+ * foi sorteada por outra questão do MESMO grupo é reaproveitada em vez de sorteada de novo.
+ * É isso que faz duas questões falarem exatamente da mesma peça. Variáveis que só existem
+ * nesta questão são sorteadas normalmente e passam a valer para as próximas do grupo.
+ */
+export function gerarValores(variaveis: VariavelDb[], rng: Rng, compartilhados?: Record<string, number>): Record<string, number> {
   const valores: Record<string, number> = {};
   for (const v of variaveis) {
-    valores[v.nome] = v.decimais > 0 ? roundTo(rng.float(v.min, v.max), v.decimais) : rng.int(v.min, v.max);
+    if (compartilhados && Object.prototype.hasOwnProperty.call(compartilhados, v.nome)) {
+      valores[v.nome] = compartilhados[v.nome];
+      continue;
+    }
+    const sorteado = v.decimais > 0 ? roundTo(rng.float(v.min, v.max), v.decimais) : rng.int(v.min, v.max);
+    valores[v.nome] = sorteado;
+    if (compartilhados) compartilhados[v.nome] = sorteado;
   }
   return valores;
+}
+
+/**
+ * Embaralha as questões mantendo cada grupo como um bloco: as questões vinculadas ficam
+ * sempre juntas e na ordem definida pelo professor. Sem isso, o aluno poderia receber a
+ * questão que USA o centroide antes da questão que pede pra CALCULAR o centroide.
+ */
+function embaralharPreservandoGrupos(questoes: QuestaoDb[], rng: Rng): QuestaoDb[] {
+  const blocos: QuestaoDb[][] = [];
+  const indiceDoGrupo: Record<string, number> = {};
+  for (const q of questoes) {
+    const g = q.grupoVariaveis || null;
+    if (g) {
+      if (indiceDoGrupo[g] === undefined) { indiceDoGrupo[g] = blocos.length; blocos.push([]); }
+      blocos[indiceDoGrupo[g]].push(q);
+    } else {
+      blocos.push([q]);
+    }
+  }
+  const resultado: QuestaoDb[] = [];
+  for (const bloco of shuffle(blocos, rng)) for (const q of bloco) resultado.push(q);
+  return resultado;
 }
 
 export function formatarNumeroBR(n: number): string {

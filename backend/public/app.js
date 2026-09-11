@@ -16,7 +16,16 @@ const state = {
   filtroBanco: { disciplina: "", assunto: "", busca: "" },
   filtroMontar: { disciplina: "", assunto: "", busca: "" },
   alunosSelecionadosInicializado: false,
+  // Campos do formulário de novo TDE. Ficam no state porque a tela é redesenhada
+  // inteira a cada clique numa questão/aluno — sem isso, o que o professor digitou
+  // voltaria ao valor padrão toda vez.
+  novoTde: { titulo: "TDE 1", valor: "10", prazo: "" },
 };
+
+// escapa aspas e sinais de menor/maior pra usar valores do state dentro de atributos HTML
+function attr(v) {
+  return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 const content = document.getElementById("content");
 const navEl = document.getElementById("nav");
@@ -678,7 +687,7 @@ async function renderBanco(mostrarForm) {
       `;
       document.querySelector("[data-editar]")?.addEventListener("click", () => {
         state.editandoQuestaoId = q.id;
-        state.editandoQuestaoDados = { disciplina: q.disciplina, assunto: q.assunto, dificuldade: q.dificuldade, enunciado: q.enunciado, formatoResposta: q.formatoResposta };
+        state.editandoQuestaoDados = { disciplina: q.disciplina, assunto: q.assunto, dificuldade: q.dificuldade, enunciado: q.enunciado, formatoResposta: q.formatoResposta, grupoVariaveis: q.grupoVariaveis };
         state.novaQuestaoVars = JSON.parse(JSON.stringify(q.variaveis));
         state.novaQuestaoEtapas = JSON.parse(JSON.stringify(q.etapas));
         state.novaQuestaoImagem = q.imagem || null;
@@ -733,7 +742,7 @@ function renderAlternativasPreview(alternativas, formato) {
 
 function renderFormNovaQuestao(container) {
   const editando = !!state.editandoQuestaoId;
-  const dados = state.editandoQuestaoDados || { disciplina: "", assunto: "", dificuldade: 2, enunciado: "", formatoResposta: "" };
+  const dados = state.editandoQuestaoDados || { disciplina: "", assunto: "", dificuldade: 2, enunciado: "", formatoResposta: "", grupoVariaveis: "" };
   const disciplinasExistentes = disciplinasDe(state.questoes || []);
   const assuntosExistentes = assuntosDe(state.questoes || [], "");
   container.innerHTML = `
@@ -803,7 +812,13 @@ function renderFormNovaQuestao(container) {
 
       <div class="field">
         <label>Formato customizado da resposta (opcional — pra vetores, notação especial, etc.)</label>
-        <input id="nq-formato-resposta" value="${dados.formatoResposta || ""}" placeholder="Ex: F = ({Fx}î + {Fz}k̂) N" class="mono" />
+        <input id="nq-formato-resposta" value="${attr(dados.formatoResposta || "")}" placeholder="Ex: F = ({Fx}î + {Fz}k̂) N" class="mono" />
+      </div>
+
+      <div class="field">
+        <label>Grupo de variáveis (opcional — pra encadear questões sobre a mesma peça)</label>
+        <input id="nq-grupo" value="${attr(dados.grupoVariaveis || "")}" placeholder="Ex: figura-ancora" class="mono" />
+        <div class="hint">Questões com o MESMO grupo, dentro de um mesmo TDE, recebem os mesmos valores sorteados nas variáveis de mesmo nome — então falam da mesma peça. Útil quando a 2ª questão precisa do resultado da 1ª. Elas também ficam sempre juntas e na ordem definida, mesmo no modo aleatório. Deixe vazio para a questão ser independente.</div>
         <div class="hint">Use {NOME} pra referenciar o valor de uma etapa marcada como "é resposta". Se deixar vazio, mostra do jeito padrão: "Fx = 5 N | Fz = 3 N".</div>
       </div>
 
@@ -1005,6 +1020,7 @@ function renderFormNovaQuestao(container) {
       etapas: state.novaQuestaoEtapas.filter((et) => et.nome && et.formula),
       imagem: state.novaQuestaoImagem || null,
       formatoResposta: document.getElementById("nq-formato-resposta").value.trim() || null,
+      grupoVariaveis: document.getElementById("nq-grupo").value.trim() || null,
     };
   }
 
@@ -1134,11 +1150,11 @@ async function renderMontar() {
         <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px;">Configuração</div>
         <div class="field">
           <label>Título do TDE</label>
-          <input id="titulo" value="TDE 1" />
+          <input id="titulo" value="${attr(state.novoTde.titulo)}" />
         </div>
         <div class="field">
           <label>Vale quantos pontos?</label>
-          <input id="valor" class="mono" type="number" step="0.1" value="10" />
+          <input id="valor" class="mono" type="number" step="0.1" value="${attr(state.novoTde.valor)}" />
         </div>
         <div class="field">
           <label>Ordem das questões</label>
@@ -1156,7 +1172,7 @@ async function renderMontar() {
         </div>
         <div class="field">
           <label>Prazo final (opcional — até quando o aluno pode responder)</label>
-          <input id="prazo" type="date" />
+          <input id="prazo" type="date" value="${attr(state.novoTde.prazo)}" />
           <div class="hint">Sem cronômetro — o aluno responde no tempo que quiser, até essa data. Deixe vazio pra não ter prazo.</div>
         </div>
         <div id="erro-publicar"></div>
@@ -1170,33 +1186,53 @@ async function renderMontar() {
   document.getElementById("voltar-turma").addEventListener("click", (e) => { e.preventDefault(); setView("turmaDetalhe"); });
   ligarBarraFiltro("montar", state.filtroMontar, () => renderMontar());
 
+  // redesenha a tela mantendo a rolagem onde estava — sem isso, cada clique numa
+  // questão jogava o professor de volta pro topo da página
+  const redesenhar = () => {
+    const y = window.scrollY;
+    renderMontar();
+    window.scrollTo(0, y);
+  };
+
   content.querySelectorAll("[data-toggle-questao]").forEach((el) => {
     el.addEventListener("click", () => {
       const id = el.dataset.toggleQuestao;
       state.selecionadas.has(id) ? state.selecionadas.delete(id) : state.selecionadas.add(id);
-      renderMontar();
+      redesenhar();
     });
   });
   content.querySelectorAll("[data-toggle-aluno]").forEach((el) => {
     el.addEventListener("click", () => {
       const id = el.dataset.toggleAluno;
       state.alunosSelecionados.has(id) ? state.alunosSelecionados.delete(id) : state.alunosSelecionados.add(id);
-      renderMontar();
+      redesenhar();
     });
   });
+  // mantém o que foi digitado dentro do state, sem redesenhar a tela (redesenhar
+  // aqui faria o campo perder o foco a cada tecla)
+  [["titulo","titulo"],["valor","valor"],["prazo","prazo"]].forEach(([id, chave]) => {
+    const campo = document.getElementById(id);
+    if (!campo) return;
+    // "input" cobre a digitação; "change" garante o seletor de data, que em alguns
+    // navegadores só dispara change ao escolher no calendário
+    const sincronizar = () => { state.novoTde[chave] = campo.value; };
+    campo.addEventListener("input", sincronizar);
+    campo.addEventListener("change", sincronizar);
+  });
+
   content.querySelectorAll("[data-ordem]").forEach((el) => {
     el.addEventListener("click", () => {
       state.embaralharQuestoes = el.dataset.ordem === "aleatoria";
-      renderMontar();
+      redesenhar();
     });
   });
   document.getElementById("btn-marcar-todos").addEventListener("click", () => {
     alunos.forEach((a) => state.alunosSelecionados.add(a.id));
-    renderMontar();
+    redesenhar();
   });
   document.getElementById("btn-desmarcar-todos").addEventListener("click", () => {
     state.alunosSelecionados.clear();
-    renderMontar();
+    redesenhar();
   });
 
   document.getElementById("btn-publicar").addEventListener("click", async (e) => {
@@ -1204,9 +1240,9 @@ async function renderMontar() {
     e.target.textContent = "Gerando provas…";
     const erroEl = document.getElementById("erro-publicar");
     try {
-      const titulo = document.getElementById("titulo").value;
-      const valor = document.getElementById("valor").value;
-      const prazoStr = document.getElementById("prazo").value; // "" ou "YYYY-MM-DD"
+      const titulo = state.novoTde.titulo;
+      const valor = state.novoTde.valor;
+      const prazoStr = state.novoTde.prazo; // "" ou "YYYY-MM-DD"
       const prazoFinal = prazoStr ? new Date(prazoStr + "T23:59:59").toISOString() : null;
       const questaoIds = Array.from(state.selecionadas);
       const alunoIds = Array.from(state.alunosSelecionados);
@@ -1222,6 +1258,7 @@ async function renderMontar() {
       state.provaAtualId = provaMestre.id;
       state.publicarResultado = resultado;
       state.selecionadas = new Set();
+      state.novoTde = { titulo: "TDE 1", valor: "10", prazo: "" }; // volta ao padrão só depois de publicar
       render();
     } catch (err) {
       erroEl.innerHTML = `<div class="error-box">Erro ao publicar: ${err.message}</div>`;
