@@ -27,6 +27,7 @@ provasRouter.get("/", asyncHandler(async (req, res) => {
       valor: p.valor,
       prazoFinal: p.prazoFinal,
       status: p.status,
+      embaralharQuestoes: p.embaralharQuestoes,
       criadoEm: p.criadoEm,
       totalQuestoes: p.questoes.length,
       totalAlunos: new Set(p.provasIndividuais.map((pi) => pi.alunoId)).size,
@@ -37,7 +38,7 @@ provasRouter.get("/", asyncHandler(async (req, res) => {
 // POST /api/provas-mestre  { titulo, turmaId, valor, prazoFinal, questaoIds: string[] }
 // valor = quantos pontos o TDE vale (padrão 10); prazoFinal é opcional (ISO string).
 provasRouter.post("/", asyncHandler(async (req, res) => {
-  const { titulo, turmaId, valor, prazoFinal, questaoIds } = req.body;
+  const { titulo, turmaId, valor, prazoFinal, questaoIds, embaralharQuestoes } = req.body;
 
   if (!titulo || !turmaId || !Array.isArray(questaoIds) || questaoIds.length === 0) {
     return res.status(400).json({ erro: "titulo, turmaId e questaoIds (não vazio) são obrigatórios." });
@@ -49,7 +50,10 @@ provasRouter.post("/", asyncHandler(async (req, res) => {
       turmaId,
       valor: valor !== undefined && valor !== null && valor !== "" ? Number(valor) : 10,
       prazoFinal: prazoFinal ? new Date(prazoFinal) : null,
+      // padrão continua sendo sortear a ordem — só desliga se vier explicitamente false
+      embaralharQuestoes: embaralharQuestoes === false ? false : true,
       questoes: {
+        // a posição no array questaoIds define a ordem fixa (usada quando embaralharQuestoes = false)
         create: questaoIds.map((questaoId: string, ordem: number) => ({ questaoId, ordem })),
       },
     },
@@ -89,7 +93,7 @@ provasRouter.post("/:id/publicar", asyncHandler(async (req, res) => {
   const provasCriadas: { alunoId: string; alunoNome: string; qrToken: string }[] = [];
 
   for (const aluno of alunos) {
-    const { seed, questoes } = gerarProvaIndividual(provaMestre.id, aluno.id, questoesBase);
+    const { seed, questoes } = gerarProvaIndividual(provaMestre.id, aluno.id, questoesBase, provaMestre.embaralharQuestoes);
 
     const provaIndividual = await prisma.provaIndividual.create({
       data: {
@@ -265,7 +269,7 @@ provasRouter.post("/:id/adicionar-alunos", asyncHandler(async (req, res) => {
 
   const provasCriadas: { alunoId: string; alunoNome: string; qrToken: string }[] = [];
   for (const aluno of alunos) {
-    const { seed, questoes } = gerarProvaIndividual(provaMestre.id, aluno.id, questoesBase);
+    const { seed, questoes } = gerarProvaIndividual(provaMestre.id, aluno.id, questoesBase, provaMestre.embaralharQuestoes);
     const provaIndividual = await prisma.provaIndividual.create({
       data: {
         provaMestreId: provaMestre.id,

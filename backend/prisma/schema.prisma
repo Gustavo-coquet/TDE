@@ -52,6 +52,10 @@ model ProvaMestre {
   valor            Float    @default(10)          // quantos pontos vale o TDE (nota é proporcional a isso)
   prazoFinal       DateTime?                      // até quando o aluno pode responder (null = sem prazo)
   status           String   @default("rascunho") // rascunho | publicada
+  embaralharQuestoes Boolean @default(true)      // true = cada aluno recebe as questões em ordem sorteada;
+                                                 // false = todos recebem na ordem definida pelo professor
+                                                 // (o campo "ordem" de ProvaMestreQuestao). As alternativas
+                                                 // e os valores numéricos continuam sorteados nos dois casos.
   criadoEm         DateTime @default(now())
 
   questoes         ProvaMestreQuestao[]

@@ -111,7 +111,7 @@ alunoExamRouter.post("/:provaMestreId/:token/nova-tentativa", asyncHandler(async
   }));
 
   // seed diferente da 1ª tentativa, pra sortear outros valores — mas continua determinística/auditável
-  const { seed, questoes } = gerarProvaIndividual(`${provaMestreId}:t${proximaTentativa}`, aluno.id, questoesBase);
+  const { seed, questoes } = gerarProvaIndividual(`${provaMestreId}:t${proximaTentativa}`, aluno.id, questoesBase, provaMestre.embaralharQuestoes);
 
   const novaProva = await prisma.provaIndividual.create({
     data: {

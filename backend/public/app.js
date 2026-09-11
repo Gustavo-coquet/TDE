@@ -5,6 +5,7 @@ const state = {
   questoes: [],
   turmas: [],
   selecionadas: new Set(),
+  embaralharQuestoes: true, // true = ordem sorteada por aluno; false = ordem fixa (a que o professor clicou)
   alunosSelecionados: new Set(),
   publicarResultado: null,
   novaQuestaoVars: [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }],
@@ -1097,7 +1098,7 @@ async function renderMontar() {
         <div id="lista-questoes">
           ${aplicarFiltro(questoes, state.filtroMontar).map((q) => `
             <div class="list-item ${state.selecionadas.has(q.id) ? "checked" : ""}" data-toggle-questao="${q.id}" style="align-items:flex-start;">
-              <div class="checkbox ${state.selecionadas.has(q.id) ? "on" : ""}" style="margin-top:2px;">${state.selecionadas.has(q.id) ? "✓" : ""}</div>
+              <div class="checkbox ${state.selecionadas.has(q.id) ? "on" : ""}" style="margin-top:2px;">${state.selecionadas.has(q.id) ? (state.embaralharQuestoes ? "✓" : String(Array.from(state.selecionadas).indexOf(q.id) + 1)) : ""}</div>
               <div style="flex:1; min-width:0;">
                 <div class="row" style="align-items:flex-start; gap:8px;">
                   <div style="min-width:0;">
@@ -1140,6 +1141,20 @@ async function renderMontar() {
           <input id="valor" class="mono" type="number" step="0.1" value="10" />
         </div>
         <div class="field">
+          <label>Ordem das questões</label>
+          <div class="list-item ${state.embaralharQuestoes ? "checked" : ""}" data-ordem="aleatoria" style="margin-bottom:6px;">
+            <div class="checkbox ${state.embaralharQuestoes ? "on" : ""}">${state.embaralharQuestoes ? "✓" : ""}</div>
+            <div style="flex:1;"><div style="font-weight:600; font-size:13px;">Aleatória</div>
+              <div class="mono muted" style="font-size:11px;">cada aluno recebe numa ordem diferente</div></div>
+          </div>
+          <div class="list-item ${!state.embaralharQuestoes ? "checked" : ""}" data-ordem="fixa">
+            <div class="checkbox ${!state.embaralharQuestoes ? "on" : ""}">${!state.embaralharQuestoes ? "✓" : ""}</div>
+            <div style="flex:1;"><div style="font-weight:600; font-size:13px;">Definida por mim</div>
+              <div class="mono muted" style="font-size:11px;">na ordem em que você clicar nas questões</div></div>
+          </div>
+          <div class="hint">${state.embaralharQuestoes ? "Os valores numéricos e as alternativas continuam sorteados por aluno." : "Os números ao lado das questões mostram a ordem. Para reordenar, desmarque e marque de novo na sequência desejada."}</div>
+        </div>
+        <div class="field">
           <label>Prazo final (opcional — até quando o aluno pode responder)</label>
           <input id="prazo" type="date" />
           <div class="hint">Sem cronômetro — o aluno responde no tempo que quiser, até essa data. Deixe vazio pra não ter prazo.</div>
@@ -1169,6 +1184,12 @@ async function renderMontar() {
       renderMontar();
     });
   });
+  content.querySelectorAll("[data-ordem]").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.embaralharQuestoes = el.dataset.ordem === "aleatoria";
+      renderMontar();
+    });
+  });
   document.getElementById("btn-marcar-todos").addEventListener("click", () => {
     alunos.forEach((a) => state.alunosSelecionados.add(a.id));
     renderMontar();
@@ -1192,7 +1213,7 @@ async function renderMontar() {
 
       const provaMestre = await api("/provas-mestre", {
         method: "POST",
-        body: JSON.stringify({ titulo, turmaId: state.turmaAtualId, valor, prazoFinal, questaoIds }),
+        body: JSON.stringify({ titulo, turmaId: state.turmaAtualId, valor, prazoFinal, questaoIds, embaralharQuestoes: state.embaralharQuestoes }),
       });
       const resultado = await api(`/provas-mestre/${provaMestre.id}/publicar`, {
         method: "POST",
