@@ -1,17 +1,16 @@
 import { Router } from "express";
 import { prisma } from "../db";
 import { Rng, hashSeed } from "../rng";
-import { resolverEtapas, valoresParaExibicao, montarEnunciado, gerarAlternativasParaQuestao, VariavelDb, EtapaDb } from "../randomizacao";
+import { resolverEtapas, montarEnunciado, gerarAlternativasParaQuestao, VariavelDb, EtapaDb } from "../randomizacao";
 import { asyncHandler } from "../asyncHandler";
 
 export const questoesRouter = Router();
 
 function preview(enunciadoTemplate: string, variaveis: VariavelDb[], etapas: EtapaDb[], seed: number) {
   const rng = new Rng(seed);
-  const valores = resolverEtapas(variaveis, etapas, rng); // precisão total
-  const exibicao = valoresParaExibicao(valores, etapas);  // arredondado só para mostrar
-  const enunciado = montarEnunciado(enunciadoTemplate, exibicao);
-  const saidas = etapas.filter((e) => e.saida).map((e) => ({ nome: e.nome, unidade: e.unidade, valor: exibicao[e.nome] }));
+  const valores = resolverEtapas(variaveis, etapas, rng);
+  const enunciado = montarEnunciado(enunciadoTemplate, valores);
+  const saidas = etapas.filter((e) => e.saida).map((e) => ({ nome: e.nome, unidade: e.unidade, valor: valores[e.nome] }));
   const alternativas = gerarAlternativasParaQuestao(etapas, valores, rng);
   return { enunciado, saidas, alternativas };
 }
