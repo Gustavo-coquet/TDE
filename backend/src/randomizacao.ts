@@ -374,7 +374,9 @@ export function gerarAlternativasMulti(
     let tentativas = 0;
     // se o valor certo é negativo (ângulo, componente de vetor...), aceita distratores negativos também;
     // se o valor certo é positivo (densidade, força, massa...), não faz sentido gerar um errado negativo
-    const podeSerNegativo = s.valor < 0;
+    // Zero conta como "pode ser negativo": se a resposta certa é 0, os distratores
+    // precisam poder ir para os dois lados, senão não sobra nenhum candidato válido.
+    const podeSerNegativo = s.valor <= 0;
     // o "empurrãozinho" extra é proporcional à grandeza do valor: somar 1..5 fixo faria um
     // resultado como 0,000032 virar distratores absurdos (3, 4...), fora de escala.
     const escala = Math.abs(s.valor) || 1;
@@ -384,7 +386,15 @@ export function gerarAlternativasMulti(
       const sinal = rng.int(0, 1) ? 1 : -1;
       const bruto = s.valor * fator + sinal * escala * (rng.int(1, 20) / 100); // ±1% a ±20% do valor
       // em notação científica não arredondamos aqui — o arredondamento vira mantissa na exibição
-      const errado = s.notacaoCientifica ? bruto : roundTo(bruto, casas[idx]);
+      let errado = s.notacaoCientifica ? bruto : roundTo(bruto, casas[idx]);
+      // Se o "erro" some no arredondamento e o distrator volta a ser a resposta certa
+      // (acontece quando o valor é 0 ou um inteiro pequeno), empurra pelo menos um passo
+      // da casa decimal exibida. Sem isso a coluna inteira sairia constante e a questão
+      // perderia esse campo — todas as alternativas mostrariam o mesmo número.
+      if (!s.notacaoCientifica && errado === s.valor) {
+        const passo = Math.pow(10, -casas[idx]);
+        errado = roundTo(s.valor + sinal * passo * rng.int(1, 3), casas[idx]);
+      }
       if (errado !== s.valor && !valores.has(errado) && (podeSerNegativo || errado > 0)) valores.add(errado);
     }
     return Array.from(valores);
