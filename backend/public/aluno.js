@@ -238,56 +238,155 @@ function renderInstrucoes() {
   document.getElementById("btn-iniciar").addEventListener("click", () => renderProva());
 }
 
+// ---------------------------------------------------------------------------
+// PÁGINAS
+// Questões encadeadas (mesmo grupo) viram UMA página: a figura e o bloco de dados
+// aparecem uma vez no topo e as perguntas descem em cascata, cada uma com suas
+// alternativas. O aluno rola a página e consulta os dados quando quiser. Questão sem
+// grupo continua sendo uma página de uma questão só, exatamente como antes.
+function paginasDa(questoes) {
+  const paginas = [];
+  const indice = new Map();
+  for (const q of questoes) {
+    const g = q.grupo || null;
+    if (!g) { paginas.push({ grupo: null, questoes: [q] }); continue; }
+    if (!indice.has(g)) { const pg = { grupo: g, questoes: [] }; indice.set(g, pg); paginas.push(pg); }
+    indice.get(g).questoes.push(q);
+  }
+  return paginas;
+}
+
+// O "Dados: ..." é igual em todas as questões do bloco. Em vez de repetir 16 vezes,
+// achamos o maior trecho FINAL comum a todas e mostramos uma vez só no topo da página.
+// Não precisa de marcador nenhum no enunciado: é deduzido do próprio texto.
+function sufixoComum(textos) {
+  if (textos.length < 2) return "";
+  const menor = Math.min(...textos.map((t) => t.length));
+  let n = 0;
+  while (n < menor && textos.every((t) => t[t.length - 1 - n] === textos[0][textos[0].length - 1 - n])) n++;
+  if (n < 40) return "";
+  let comum = textos[0].slice(textos[0].length - n);
+  // corta no começo de uma linha, pra não partir uma frase no meio
+  const quebra = comum.indexOf("\n");
+  if (quebra < 0) return "";
+  comum = comum.slice(quebra + 1);
+  return comum.trim().length >= 30 ? comum : "";
+}
+
 function renderProva() {
   const p = state.prova;
-  const q = p.questoes[state.atual];
+  const paginas = paginasDa(p.questoes);
+  if (state.atual > paginas.length - 1) state.atual = paginas.length - 1;
+  if (state.atual < 0) state.atual = 0;
+  const pg = paginas[state.atual];
+  const bloco = pg.questoes.length > 1;
+
+  const figura = figuraDe(pg.questoes[0], p.questoes);
+  const comum = sufixoComum(pg.questoes.map((q) => q.enunciado));
+  const especifico = (q) =>
+    comum && q.enunciado.endsWith(comum) ? q.enunciado.slice(0, q.enunciado.length - comum.length).trimEnd() : q.enunciado;
+
+  // a barra de progresso continua por QUESTÃO (é o que o aluno conta), mas cada segmento
+  // leva pra PÁGINA onde aquela questão está
+  const paginaDe = new Map();
+  paginas.forEach((x, i) => x.questoes.forEach((q) => paginaDe.set(q.id, i)));
+  const numero = (q) => p.questoes.indexOf(q) + 1;
+  const respondidasAqui = pg.questoes.filter((q) => state.respostas[q.id]).length;
 
   content.innerHTML = `
     <div class="row" style="margin-bottom:10px;">
-      <span class="mono muted" style="font-size:12px;">QUESTÃO ${state.atual + 1} / ${p.questoes.length}</span>
+      <span class="mono muted" style="font-size:12px;">${
+        bloco
+          ? `BLOCO · QUESTÕES ${numero(pg.questoes[0])} A ${numero(pg.questoes[pg.questoes.length - 1])} DE ${p.questoes.length}`
+          : `QUESTÃO ${numero(pg.questoes[0])} / ${p.questoes.length}`
+      }</span>
       <span class="mono muted" style="font-size:11px;">Tentativa ${p.tentativa}</span>
     </div>
 
     <div class="progress-track">
-      ${p.questoes.map((qq, i) => `<div class="progress-seg ${state.respostas[qq.id] ? 'answered' : (i===state.atual?'current':'')}" data-jump="${i}"></div>`).join("")}
+      ${p.questoes
+        .map(
+          (qq) =>
+            `<div class="progress-seg ${
+              state.respostas[qq.id] ? "answered" : paginaDe.get(qq.id) === state.atual ? "current" : ""
+            }" data-jump="${paginaDe.get(qq.id)}" data-qid="${qq.id}"></div>`
+        )
+        .join("")}
     </div>
-    <div class="muted" style="font-size:11px; margin-bottom:14px;">💾 Suas respostas são salvas automaticamente. Pode pular questões e sair a qualquer momento — depois é só voltar com o mesmo link.</div>
+    <div class="muted" style="font-size:11px; margin-bottom:14px;">💾 Suas respostas são salvas automaticamente. Pode pular questões e sair a qualquer momento — depois é só voltar com o mesmo link.${
+      bloco ? " Esta página tem várias perguntas sobre a mesma estrutura: role para baixo para ver todas." : ""
+    }</div>
 
     <div class="card">
       <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
-      <span class="pill">${q.tema}</span>
-      ${figuraDe(q, p.questoes) ? `<img src="${figuraDe(q, p.questoes)}" style="max-width:min(100%, 420px); max-height:320px; width:auto; height:auto; display:block; margin:14px auto 0; border:1px solid var(--line-faint); cursor:zoom-in;" onclick="window.open('${figuraDe(q, p.questoes)}', '_blank')" title="Clique para ampliar" />` : ""}
-      <div style="font-size:15.5px; line-height:1.7; margin-top:14px;">${formatarEnunciado(q.enunciado)}</div>
-      <div style="margin-top:18px;">
-        ${q.alternativas.map((a) => `
-          <div class="option ${state.respostas[q.id]===a.letra?'selected':''}" data-letra="${a.letra}">
-            <div class="option-letter">${a.letra}</div>
-            <span class="mono" style="font-size:14px;">${textoAlternativa(a.campos, q.formatoResposta)}</span>
-          </div>
-        `).join("")}
+      <div class="row" style="align-items:flex-start;">
+        <span class="pill">${pg.questoes[0].tema}</span>
+        ${bloco ? `<span class="mono muted" style="font-size:11px;" id="contador-pagina">${respondidasAqui} de ${pg.questoes.length} respondidas</span>` : ""}
       </div>
+      ${figura ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:320px; width:auto; height:auto; display:block; margin:14px auto 0; border:1px solid var(--line-faint); cursor:zoom-in;" onclick="window.open('${figura}', '_blank')" title="Clique para ampliar" />` : ""}
+      ${comum ? `<div style="font-size:15px; line-height:1.7; margin-top:14px; padding:12px 14px; background:rgba(79,209,197,.06); border-left:3px solid var(--teal);">${formatarEnunciado(comum)}</div>` : ""}
+      ${pg.questoes
+        .map(
+          (q, i) => `
+        <div style="margin-top:${i === 0 && !comum && !figura ? "14px" : "20px"}; ${
+            bloco ? "border-top:1px solid var(--line-faint); padding-top:16px;" : ""
+          }">
+          ${bloco ? `<div class="mono" id="rot-${q.id}" style="font-size:11px; color:${state.respostas[q.id] ? "var(--teal)" : "var(--ink-faint)"}; margin-bottom:8px;">QUESTÃO ${numero(q)}${state.respostas[q.id] ? " · respondida" : ""}</div>` : ""}
+          <div style="font-size:15.5px; line-height:1.7;">${formatarEnunciado(especifico(q))}</div>
+          <div style="margin-top:14px;">
+            ${q.alternativas
+              .map(
+                (a) => `
+              <div class="option ${state.respostas[q.id] === a.letra ? "selected" : ""}" data-letra="${a.letra}" data-questao="${q.id}">
+                <div class="option-letter">${a.letra}</div>
+                <span class="mono" style="font-size:14px;">${textoAlternativa(a.campos, q.formatoResposta)}</span>
+              </div>`
+              )
+              .join("")}
+          </div>
+        </div>`
+        )
+        .join("")}
     </div>
 
     <div class="row" style="margin-top:16px;">
-      <button class="btn ghost" id="btn-anterior" ${state.atual===0?'disabled':''}>← Anterior</button>
+      <button class="btn ghost" id="btn-anterior" ${state.atual === 0 ? "disabled" : ""}>← Anterior</button>
       <div style="display:flex; gap:8px;">
         <button class="btn ghost" id="btn-pausar" style="font-size:12.5px;">Salvar e sair</button>
-        ${state.atual < p.questoes.length - 1
+        ${state.atual < paginas.length - 1
           ? `<button class="btn" id="btn-proxima">Próxima →</button>`
           : `<button class="btn" id="btn-finalizar">✓ Finalizar prova</button>`}
       </div>
     </div>
   `;
 
+  // Marcar uma alternativa NÃO redesenha a página. Numa página de bloco, redesenhar fazia o
+  // aluno perder o lugar do scroll (a imagem some e volta, a página encolhe e o navegador
+  // corta a rolagem). Aqui a gente mexe só no que mudou.
   content.querySelectorAll("[data-letra]").forEach((el) => {
     el.addEventListener("click", async () => {
       const letra = el.dataset.letra;
-      state.respostas[q.id] = letra;
-      renderProva();
+      const questaoId = el.dataset.questao;
+      state.respostas[questaoId] = letra;
+
+      content.querySelectorAll(`[data-questao="${questaoId}"]`).forEach((o) => o.classList.toggle("selected", o === el));
+      const seg = content.querySelector(`[data-qid="${questaoId}"]`);
+      if (seg) { seg.classList.add("answered"); seg.classList.remove("current"); }
+      const rot = document.getElementById(`rot-${questaoId}`);
+      if (rot && !rot.textContent.includes("respondida")) {
+        rot.textContent = rot.textContent + " · respondida";
+        rot.style.color = "var(--teal)";
+      }
+      const contador = document.getElementById("contador-pagina");
+      if (contador) {
+        const n = pg.questoes.filter((x) => state.respostas[x.id]).length;
+        contador.textContent = `${n} de ${pg.questoes.length} respondidas`;
+      }
+
       try {
         await api(`/prova/${provaMestreId}/${encodeURIComponent(token)}/responder`, {
           method: "POST",
-          body: JSON.stringify({ provaIndividualQuestaoId: q.id, letra }),
+          body: JSON.stringify({ provaIndividualQuestaoId: questaoId, letra }),
         });
       } catch (e) {
         console.error("Falha ao salvar resposta:", e.message);
@@ -296,13 +395,13 @@ function renderProva() {
   });
 
   content.querySelectorAll("[data-jump]").forEach((el) => {
-    el.addEventListener("click", () => { state.atual = Number(el.dataset.jump); renderProva(); });
+    el.addEventListener("click", () => { state.atual = Number(el.dataset.jump); renderProva(); window.scrollTo(0, 0); });
   });
 
   const btnAnt = document.getElementById("btn-anterior");
-  if (btnAnt) btnAnt.addEventListener("click", () => { state.atual = Math.max(0, state.atual - 1); renderProva(); });
+  if (btnAnt) btnAnt.addEventListener("click", () => { state.atual = Math.max(0, state.atual - 1); renderProva(); window.scrollTo(0, 0); });
   const btnProx = document.getElementById("btn-proxima");
-  if (btnProx) btnProx.addEventListener("click", () => { state.atual++; renderProva(); });
+  if (btnProx) btnProx.addEventListener("click", () => { state.atual++; renderProva(); window.scrollTo(0, 0); });
   const btnFim = document.getElementById("btn-finalizar");
   if (btnFim) btnFim.addEventListener("click", finalizar);
   const btnPausar = document.getElementById("btn-pausar");
