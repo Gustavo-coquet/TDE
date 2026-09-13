@@ -15,6 +15,13 @@ export interface EtapaDb {
   unidade: string;    // pode ficar vazio pra etapas de texto
   saida: boolean;     // true = esta etapa aparece como uma das respostas mostradas ao aluno
   notacaoCientifica?: boolean; // true = exibe como 1,84 × 10^3 em vez de 1840
+  // DISTRATORES AUTORAIS: cada string é uma FÓRMULA que reproduz um ERRO TÍPICO do aluno.
+  // Em vez de números aleatórios, as alternativas erradas passam a ser contas plausíveis.
+  // As listas de todas as saídas da questão são alinhadas POR ÍNDICE: o distrator nº 3 de
+  // cada campo vem do MESMO erro, então a alternativa inteira é uma cadeia errada coerente.
+  // O aluno que cometeu aquele erro encontra a linha dele certinha e não desconfia de nada.
+  // Regra: ou TODAS as saídas da questão têm lista, ou nenhuma tem.
+  distratores?: string[];
 }
 
 export interface QuestaoDb {
@@ -248,7 +255,25 @@ export function gerarAlternativasParaQuestao(
     return gerarAlternativasSomenteTexto(etapas, etapasTexto, valores, rng);
   }
 
-  const alternativas = gerarAlternativasMulti(saidasNumericas, rng);
+  // Avalia as fórmulas de distrator de cada saída independente, mantendo o alinhamento por
+  // índice de erro. Fórmula que quebra ou que não devolve número vira null e derruba aquela
+  // linha inteira — as vagas que sobrarem voltam para os distratores aleatórios de sempre.
+  const temAutorais = independentes.some((e) => e.distratores && e.distratores.length > 0);
+  const autorais = temAutorais
+    ? independentes.map((e) =>
+        (e.distratores ?? []).map((formula) => {
+          try {
+            const bruto = avaliarExpressao(formula, valores);
+            if (typeof bruto !== "number" || !isFinite(bruto)) return null;
+            return e.notacaoCientifica ? bruto : roundTo(bruto, e.decimais);
+          } catch {
+            return null;
+          }
+        })
+      )
+    : null;
+
+  const alternativas = gerarAlternativasMulti(saidasNumericas, rng, autorais);
 
   // recalcula, em cada alternativa, os campos derivados e os de texto usando os valores daquela opção
   const paraRecalcular = [...derivadas, ...etapasTexto];
@@ -359,7 +384,10 @@ function gerarAlternativasSomenteTexto(
  */
 export function gerarAlternativasMulti(
   saidas: { nome: string; unidade: string; valor: number; decimais?: number; notacaoCientifica?: boolean }[],
-  rng: Rng
+  rng: Rng,
+  // distratores autorais já avaliados, alinhados com `saidas`.
+  // autorais[i][k] = valor do campo i no erro nº k (null = a fórmula falhou nesse sorteio)
+  autorais?: (number | null)[][] | null
 ): AlternativaGerada[] {
   const TOTAL_ALTERNATIVAS = 8; // A até H — só uma correta, dificulta o chute
   const fatores = [0.4, 0.5, 0.6, 0.75, 1.25, 1.5, 1.75, 2, 2.5];
@@ -402,6 +430,29 @@ export function gerarAlternativasMulti(
 
   const tuplaCorreta = saidas.map((s) => s.valor);
   const tuplas: number[][] = [tuplaCorreta];
+
+  // ---- distratores autorais (erros típicos) ---------------------------------
+  // A alternativa nº k é a cadeia inteira do erro nº k. Se qualquer campo dessa linha não
+  // pôde ser calculado, o erro k é descartado INTEIRO — nunca se mistura o valor de um erro
+  // com o de outro, senão a linha deixaria de ser uma conta plausível.
+  if (autorais && autorais.length === saidas.length && autorais.some((a) => a && a.length)) {
+    const quantos = Math.max(...autorais.map((a) => (a ? a.length : 0)));
+    for (let k = 0; k < quantos && tuplas.length < TOTAL_ALTERNATIVAS; k++) {
+      const tupla: number[] = [];
+      let completa = true;
+      for (let i = 0; i < saidas.length; i++) {
+        const lista = autorais[i];
+        const v = lista && k < lista.length ? lista[k] : null;
+        if (v === null || v === undefined) { completa = false; break; }
+        tupla.push(v);
+      }
+      if (!completa) continue;
+      const igualCorreta = tupla.every((v, i) => v === tuplaCorreta[i]);
+      const jaExiste = tuplas.some((t) => t.every((v, i) => v === tupla[i]));
+      if (!igualCorreta && !jaExiste) tuplas.push(tupla);
+    }
+  }
+  // ---------------------------------------------------------------------------
 
   let tentativas = 0;
   while (tuplas.length < TOTAL_ALTERNATIVAS && tentativas < 600) {
