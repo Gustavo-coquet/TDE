@@ -37,7 +37,7 @@ navEl.querySelectorAll(".nav-item").forEach((el) => {
 function setView(view, extra) {
   state.view = view;
   if (extra) Object.assign(state, extra);
-  const destaque = view === "turmaDetalhe" || view === "montar" ? "turmas" : view;
+  const destaque = view === "turmaDetalhe" || view === "montar" || view === "simular" ? "turmas" : view;
   navEl.querySelectorAll(".nav-item").forEach((el) => el.classList.toggle("active", el.dataset.view === destaque));
   render();
 }
@@ -274,6 +274,7 @@ async function render() {
     else if (state.view === "turmaDetalhe") await renderTurmaDetalhe();
     else if (state.view === "banco") await renderBanco();
     else if (state.view === "montar") await renderMontar();
+    else if (state.view === "simular") renderSimular();
     else if (state.view === "resultados") await renderResultados();
   } catch (e) {
     content.innerHTML = `<div class="error-box">Erro: ${e.message}. Confira se o backend está rodando e o banco foi migrado.</div>`;
@@ -1293,6 +1294,9 @@ async function renderMontar() {
           <div class="hint">Sem cronômetro — o aluno responde no tempo que quiser, até essa data. Deixe vazio pra não ter prazo.</div>
         </div>
         <div id="erro-publicar"></div>
+        <button class="btn subtle" id="btn-simular" style="width:100%; justify-content:center; margin-bottom:8px;" ${state.selecionadas.size === 0 ? "disabled" : ""}>
+          Simular este TDE (não salva nada)
+        </button>
         <button class="btn" id="btn-publicar" style="width:100%; justify-content:center;" ${state.selecionadas.size === 0 || state.alunosSelecionados.size === 0 ? "disabled" : ""}>
           Publicar e gerar ${state.alunosSelecionados.size} provas individuais
         </button>
@@ -1363,6 +1367,27 @@ async function renderMontar() {
     redesenhar();
   });
 
+  // Simulação: gera uma prova exatamente como o aluno receberia, sem criar TDE nenhum.
+  document.getElementById("btn-simular").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Gerando simulação…";
+    try {
+      state.simulacao = await api("/provas-mestre/simular", {
+        method: "POST",
+        body: JSON.stringify({
+          questaoIds: Array.from(state.selecionadas),
+          embaralharQuestoes: state.embaralharQuestoes,
+          seed: "exemplo-" + Date.now(),
+        }),
+      });
+      setView("simular");
+    } catch (err) {
+      document.getElementById("erro-publicar").innerHTML = `<div class="error-box">Erro ao simular: ${err.message}</div>`;
+      e.target.disabled = false;
+      e.target.textContent = "Simular este TDE (não salva nada)";
+    }
+  });
+
   document.getElementById("btn-publicar").addEventListener("click", async (e) => {
     e.target.disabled = true;
     e.target.textContent = "Gerando provas…";
@@ -1392,6 +1417,72 @@ async function renderMontar() {
       erroEl.innerHTML = `<div class="error-box">Erro ao publicar: ${err.message}</div>`;
       e.target.disabled = false;
       e.target.textContent = "Publicar e gerar provas";
+    }
+  });
+}
+
+// Tela de SIMULAÇÃO. Mostra a prova montada pelo mesmo gerador que o aluno usa, com o
+// gabarito destacado e os valores sorteados à mostra. Nada aqui foi salvo no banco:
+// é só conferência antes de publicar.
+function renderSimular() {
+  const s = state.simulacao;
+  if (!s) { setView("montar"); return; }
+  content.innerHTML = `
+    <div style="margin-bottom:6px;"><a href="#" id="voltar-montar" class="mono muted" style="font-size:12px;">← voltar e ajustar o TDE</a></div>
+    <div class="eyebrow" style="color:var(--amber);">SIMULAÇÃO · NADA FOI SALVO</div>
+    <h1 style="margin-bottom:4px;">Como um aluno veria este TDE</h1>
+    <div class="mono muted" style="font-size:12px; margin-bottom:14px;">
+      ${s.questoes.length} ${s.questoes.length === 1 ? "questão" : "questões"} ·
+      ${state.embaralharQuestoes ? "ordem sorteada" : "ordem definida por você"} ·
+      a alternativa correta está destacada
+    </div>
+    <div class="row" style="justify-content:flex-start; gap:8px; margin-bottom:18px;">
+      <button class="btn subtle" id="btn-outro-aluno">Sortear outro aluno</button>
+      <span class="mono muted" style="font-size:11px;">outro sorteio dos valores, das alternativas e da ordem</span>
+    </div>
+    ${s.questoes.map((q, i) => {
+      const figura = figuraDe(q, s.questoes);
+      const params = Object.entries(q.parametros || {})
+        .filter(([, v]) => typeof v === "number")
+        .map(([k, v]) => `${k} = ${formatarBR(v)}`)
+        .join("   ·   ");
+      return `
+        <div class="card" style="margin-bottom:14px;">
+          ${corners()}
+          <div class="row" style="align-items:flex-start;">
+            <span class="pill">${i + 1} de ${s.questoes.length} — ${q.tema}</span>
+            <span class="mono" style="font-size:11px; color:var(--green);">resposta ${q.respostaCorretaLetra}</span>
+          </div>
+          ${figura ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:300px; width:auto; height:auto; display:block; margin:12px auto 0; border:1px solid var(--line-faint);" />` : ""}
+          <div style="font-size:14.5px; line-height:1.7; margin-top:12px;">${formatarEnunciado(q.enunciado)}</div>
+          <div style="margin-top:14px;">${renderAlternativasPreview(q.alternativas, q.formatoResposta)}</div>
+          <details style="margin-top:12px;">
+            <summary class="mono muted" style="font-size:11px; cursor:pointer;">valores sorteados e etapas</summary>
+            <div class="mono muted" style="font-size:11px; line-height:1.8; margin-top:6px; word-break:break-word;">${params}</div>
+          </details>
+        </div>`;
+    }).join("")}
+    <button class="btn subtle" id="voltar-montar-2" style="width:100%; justify-content:center;">← voltar e ajustar o TDE</button>
+  `;
+  content.querySelectorAll("#voltar-montar, #voltar-montar-2").forEach((el) =>
+    el.addEventListener("click", (e) => { e.preventDefault(); setView("montar"); })
+  );
+  document.getElementById("btn-outro-aluno").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Sorteando…";
+    try {
+      state.simulacao = await api("/provas-mestre/simular", {
+        method: "POST",
+        body: JSON.stringify({
+          questaoIds: Array.from(state.selecionadas),
+          embaralharQuestoes: state.embaralharQuestoes,
+          seed: "exemplo-" + Date.now() + "-" + Math.random(),
+        }),
+      });
+      renderSimular();
+    } catch (err) {
+      e.target.disabled = false;
+      e.target.textContent = "Sortear outro aluno";
     }
   });
 }
