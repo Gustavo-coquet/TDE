@@ -63,6 +63,63 @@ provasRouter.post("/", asyncHandler(async (req, res) => {
   res.status(201).json(provaMestre);
 }));
 
+// POST /api/provas-mestre/simular   body: { questaoIds, embaralharQuestoes?, seed? }
+// Monta uma prova individual EXATAMENTE como o aluno receberia — mesma função de geração,
+// mesmos grupos encadeados, mesma ordem — mas NÃO grava nada: nenhuma ProvaMestre, nenhuma
+// ProvaIndividual, nenhum aluno envolvido. Serve pro professor conferir enunciados, valores
+// sorteados e gabarito antes de publicar de verdade.
+provasRouter.post("/simular", asyncHandler(async (req, res) => {
+  const { questaoIds, embaralharQuestoes, seed } = req.body as {
+    questaoIds?: string[]; embaralharQuestoes?: boolean; seed?: string;
+  };
+  if (!Array.isArray(questaoIds) || questaoIds.length === 0) {
+    return res.status(400).json({ erro: "Selecione ao menos uma questão para simular." });
+  }
+
+  const encontradas = await prisma.questao.findMany({ where: { id: { in: questaoIds } } });
+  // respeita a ordem em que o professor clicou (é ela que vale quando a ordem é fixa)
+  const questoes = questaoIds
+    .map((id) => encontradas.find((q) => q.id === id))
+    .filter(Boolean) as any[];
+  if (questoes.length === 0) {
+    return res.status(404).json({ erro: "Nenhuma das questões selecionadas foi encontrada." });
+  }
+
+  const gerada = gerarProvaIndividual(
+    "simulacao",
+    seed || "aluno-exemplo",
+    questoes.map((q) => ({
+      id: q.id,
+      enunciado: q.enunciado,
+      variaveis: q.variaveis as any,
+      etapas: q.etapas as any,
+      grupoVariaveis: q.grupoVariaveis,
+    })),
+    embaralharQuestoes === false ? false : true
+  );
+
+  const porId = new Map<string, any>(questoes.map((q: any) => [q.id, q]));
+  res.json({
+    seed: gerada.seed,
+    questoes: gerada.questoes.map((g) => {
+      const q = porId.get(g.questaoId)!;
+      return {
+        questaoId: g.questaoId,
+        ordem: g.ordem,
+        tema: `${q.disciplina} — ${q.assunto}`,
+        imagem: q.imagem,
+        grupo: q.grupoVariaveis,
+        formatoResposta: q.formatoResposta,
+        enunciado: g.enunciadoFinal,
+        parametros: g.parametrosGerados,
+        // aqui o professor VÊ qual é a correta — é o ponto da simulação
+        alternativas: g.alternativasFinal,
+        respostaCorretaLetra: g.respostaCorretaLetra,
+      };
+    }),
+  });
+}));
+
 // POST /api/provas-mestre/:id/publicar   body: { alunoIds: string[] }
 // Gera a 1ª tentativa (randomizada e parametrizada) para cada aluno escolhido.
 // Esse é o passo que materializa a garantia de equivalência: mesmo conjunto de
