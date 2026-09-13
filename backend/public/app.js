@@ -88,24 +88,34 @@ function blocosDe(filtradas, todas) {
 
 // moldura do bloco: usada no Novo TDE (clicável, marca tudo) e no Banco (só visual)
 function molduraBloco(b, ativo, dentro, clicavel) {
+  // O bloco usa ÂMBAR, não o verde-água do resto da interface: assim "isto é um bloco"
+  // não se confunde com "isto está selecionado", que continua sendo o verde do checkbox.
   return `
-    <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid ${ativo ? "var(--teal-dim)" : "var(--line)"};
-         border-left:3px solid ${ativo ? "var(--teal)" : "var(--line)"};
-         background:${ativo ? "rgba(79,209,197,.05)" : "var(--surface)"};
-         padding:11px 12px 3px; margin-bottom:12px; ${clicavel ? "cursor:pointer;" : ""}">
+    <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid rgba(232,163,61,${ativo ? ".55" : ".35"});
+         border-left:4px solid ${ativo ? "var(--amber)" : "rgba(232,163,61,.6)"};
+         background:rgba(232,163,61,${ativo ? ".10" : ".05"});
+         box-shadow:${ativo ? "inset 0 0 0 1px rgba(232,163,61,.12)" : "none"};
+         padding:11px 12px 3px; margin-bottom:14px; ${clicavel ? "cursor:pointer;" : ""}">
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
         ${clicavel ? `<div class="checkbox ${ativo ? "on" : ""}">${ativo ? "✓" : (b.parcial ? "–" : "")}</div>` : ""}
         <div style="flex:1; min-width:0;">
-          <div class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--teal);">
+          <div class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--amber); font-weight:600;">
             Bloco encadeado · ${b.grupo}
           </div>
-          <div class="mono muted" style="font-size:11px; margin-top:2px;">
+          <div class="mono" style="font-size:11px; margin-top:2px; color:rgba(232,163,61,.72);">
             ${b.questoes.length} questões — mesmos valores sorteados, entram e saem juntas
           </div>
         </div>
       </div>
       ${dentro}
     </div>`;
+}
+
+// título curto de uma questão dentro de um bloco: as respostas que ela pede.
+// "Va = {Va} kN · Vb = {Vb} kN" vira "Va · Vb" — serve de índice do bloco.
+function rotuloRespostas(q) {
+  const achados = (q.formatoResposta || "").match(/\{([^}]+)\}/g);
+  return achados ? achados.map((n) => n.slice(1, -1)).join(" · ") : q.assunto;
 }
 
 // uma questão na lista do Novo TDE. Dentro de um bloco ela não repete disciplina/assunto
@@ -692,7 +702,7 @@ async function renderBanco(mostrarForm) {
     </div>
     ${mostrarForm ? `<div id="form-questao" style="margin-bottom:18px;"></div>` : ""}
     ${renderBarraFiltro("banco", questoes, state.filtroBanco)}
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start;">
       <div>
         <div class="mono muted" style="font-size:11px; margin-bottom:8px;">${filtradas.length} de ${questoes.length} questões</div>
         ${blocosDe(filtradas, questoes).map((b) => {
@@ -702,7 +712,7 @@ async function renderBanco(mostrarForm) {
             <div class="row">
               <div>
                 ${dentro ? "" : `<span class="pill" style="margin-bottom:6px;">${q.disciplina}</span>`}
-                <div style="font-weight:600; font-size:13.5px; margin-top:${dentro ? "0" : "6px"};">${dentro ? q.formatoResposta || q.assunto : q.assunto}</div>
+                <div style="font-weight:600; font-size:13.5px; margin-top:${dentro ? "0" : "6px"};">${dentro ? rotuloRespostas(q) : q.assunto}</div>
               </div>
               <div class="dots">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
             </div>
@@ -713,7 +723,7 @@ async function renderBanco(mostrarForm) {
         }).join("")}
         ${filtradas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px;">${corners()}Nenhuma questão encontrada com esse filtro.</div>` : ""}
       </div>
-      <div id="preview-pane">
+      <div id="preview-pane" style="position:sticky; top:14px; align-self:start; max-height:calc(100vh - 28px); overflow-y:auto;">
         <div class="card muted" style="text-align:center; padding:40px; font-size:13px;">
           ${corners()}
           Clique em uma questão para ver a parametrização
