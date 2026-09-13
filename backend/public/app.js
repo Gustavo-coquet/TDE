@@ -116,23 +116,54 @@ function blocosDe(filtradas, todas) {
   return blocos;
 }
 
+// Paleta dos blocos. Cada bloco pega uma cor, e dois blocos VIZINHOS nunca ficam com a
+// mesma — a cor sai de um hash do nome do grupo (então "viga-A" tende a ser sempre a mesma
+// cor, em qualquer tela) e só muda se colidir com a do bloco imediatamente acima.
+const PALETA_BLOCO = [
+  { nome: "âmbar",  rgb: "232,163,61"  },
+  { nome: "verde",  rgb: "127,216,143" },
+  { nome: "azul",   rgb: "109,166,255" },
+  { nome: "rosa",   rgb: "231,125,176" },
+  { nome: "marrom", rgb: "192,124,78"  },
+];
+
+function hashGrupo(texto) {
+  let h = 0;
+  for (let i = 0; i < texto.length; i++) h = (h * 31 + texto.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+// devolve um Map grupo -> cor, já resolvendo o choque entre blocos consecutivos
+function coresDosBlocos(blocos) {
+  const mapa = new Map();
+  let anterior = -1;
+  for (const b of blocos) {
+    if (!b.grupo) continue;
+    let i = hashGrupo(b.grupo) % PALETA_BLOCO.length;
+    if (i === anterior) i = (i + 1) % PALETA_BLOCO.length;
+    mapa.set(b.grupo, PALETA_BLOCO[i]);
+    anterior = i;
+  }
+  return mapa;
+}
+
 // moldura do bloco: usada no Novo TDE (clicável, marca tudo) e no Banco (só visual)
-function molduraBloco(b, ativo, dentro, clicavel) {
-  // O bloco usa ÂMBAR, não o verde-água do resto da interface: assim "isto é um bloco"
-  // não se confunde com "isto está selecionado", que continua sendo o verde do checkbox.
+function molduraBloco(b, ativo, dentro, clicavel, cor) {
+  // A cor identifica o BLOCO; o verde-água do checkbox continua significando "selecionado".
+  const c = (cor || PALETA_BLOCO[0]).rgb;
   return `
-    <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid rgba(232,163,61,${ativo ? ".55" : ".35"});
-         border-left:4px solid ${ativo ? "var(--amber)" : "rgba(232,163,61,.6)"};
-         background:rgba(232,163,61,${ativo ? ".10" : ".05"});
-         box-shadow:${ativo ? "inset 0 0 0 1px rgba(232,163,61,.12)" : "none"};
+    <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid rgba(${c},${ativo ? ".55" : ".35"});
+         border-left:4px solid rgba(${c},${ativo ? "1" : ".6"});
+         background:rgba(${c},${ativo ? ".10" : ".05"});
+         box-shadow:${ativo ? `inset 0 0 0 1px rgba(${c},.12)` : "none"};
          padding:11px 12px 3px; margin-bottom:14px; ${clicavel ? "cursor:pointer;" : ""}">
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
         ${clicavel ? `<div class="checkbox ${ativo ? "on" : ""}">${ativo ? "✓" : (b.parcial ? "–" : "")}</div>` : ""}
         <div style="flex:1; min-width:0;">
-          <div class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--amber); font-weight:600;">
+          <div class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:rgb(${c}); font-weight:600;">
             Bloco encadeado · ${b.grupo}
           </div>
-          <div class="mono" style="font-size:11px; margin-top:2px; color:rgba(232,163,61,.72);">
+          <div class="mono" style="font-size:11px; margin-top:2px; color:rgba(${c},.72);">
             ${b.questoes.length} questões — mesmos valores sorteados, entram e saem juntas
           </div>
         </div>
@@ -150,7 +181,7 @@ function rotuloRespostas(q) {
 
 // uma questão na lista do Novo TDE. Dentro de um bloco ela não repete disciplina/assunto
 // (são iguais nas 12) e não é clicável sozinha — quem manda é a moldura.
-function itemQuestaoMontar(q, dentroDeBloco) {
+function itemQuestaoMontar(q, dentroDeBloco, cor) {
   const sel = state.selecionadas.has(q.id);
   const marca = sel ? (state.embaralharQuestoes ? "✓" : String(Array.from(state.selecionadas).indexOf(q.id) + 1)) : "";
   const cabeca = dentroDeBloco ? "" : `
@@ -165,7 +196,7 @@ function itemQuestaoMontar(q, dentroDeBloco) {
               <div style="flex:1; min-width:0;">
                 <div class="row" style="align-items:flex-start; gap:8px;">
                   ${cabeca}
-                  ${dentroDeBloco && q.imagem ? `<span class="mono" style="flex-shrink:0; font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--amber); border:1px solid rgba(232,163,61,.5); padding:1px 5px; margin-left:auto;">figura do bloco</span>` : ""}
+                  ${dentroDeBloco && q.imagem ? `<span class="mono" style="flex-shrink:0; font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:rgb(${(cor || PALETA_BLOCO[0]).rgb}); border:1px solid rgba(${(cor || PALETA_BLOCO[0]).rgb},.5); padding:1px 5px; margin-left:auto;">figura do bloco</span>` : ""}
                   <div class="dots" style="flex-shrink:0; ${dentroDeBloco && q.imagem ? "margin-left:8px;" : "margin-left:auto;"}">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
                 </div>
                 <div class="mono muted" style="font-size:11px; margin-top:${dentroDeBloco ? "0" : "6px"}; line-height:1.5; max-height:54px; overflow:hidden;">${formatarEnunciado(q.preview && q.preview.enunciado ? q.preview.enunciado : q.enunciado)}</div>
@@ -737,7 +768,10 @@ async function renderBanco(mostrarForm) {
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start;">
       <div>
         <div class="mono muted" style="font-size:11px; margin-bottom:8px;">${filtradas.length} de ${questoes.length} questões</div>
-        ${blocosDe(filtradas, questoes).map((b) => {
+        ${(() => {
+          const lista = blocosDe(filtradas, questoes);
+          const cores = coresDosBlocos(lista);
+          return lista.map((b) => {
           const cartao = (q, dentro) => `
           <div class="card" style="margin-bottom:10px; cursor:pointer; ${dentro ? "background:var(--surface-raised);" : ""}" data-questao="${q.id}">
             ${corners()}
@@ -751,8 +785,9 @@ async function renderBanco(mostrarForm) {
             <div class="mono muted" style="font-size:11.5px; margin-top:8px; line-height:1.6;">${formatarEnunciado(q.preview.enunciado)}</div>
           </div>`;
           if (!b.grupo) return cartao(b.questoes[0], false);
-          return molduraBloco(b, false, b.questoes.map((q) => cartao(q, true)).join(""), false);
-        }).join("")}
+          return molduraBloco(b, false, b.questoes.map((q) => cartao(q, true)).join(""), false, cores.get(b.grupo));
+          }).join("");
+        })()}
         ${filtradas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px;">${corners()}Nenhuma questão encontrada com esse filtro.</div>` : ""}
       </div>
       <div id="preview-pane" style="position:sticky; top:14px; align-self:start; max-height:calc(100vh - 28px); overflow-y:auto;">
@@ -1255,12 +1290,17 @@ async function renderMontar() {
         <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:10px;">Questões (${state.selecionadas.size} selecionadas de ${questoes.length} no banco)</div>
         ${renderBarraFiltro("montar", questoes, state.filtroMontar)}
         <div id="lista-questoes">
-          ${blocosDe(aplicarFiltro(questoes, state.filtroMontar), questoes).map((b) => {
-            if (!b.grupo) return itemQuestaoMontar(b.questoes[0], false);
-            b.parcial = b.questoes.some((q) => state.selecionadas.has(q.id));
-            const todas = b.questoes.every((q) => state.selecionadas.has(q.id));
-            return molduraBloco(b, todas, b.questoes.map((q) => itemQuestaoMontar(q, true)).join(""), true);
-          }).join("")}
+          ${(() => {
+            const lista = blocosDe(aplicarFiltro(questoes, state.filtroMontar), questoes);
+            const cores = coresDosBlocos(lista);
+            return lista.map((b) => {
+              if (!b.grupo) return itemQuestaoMontar(b.questoes[0], false);
+              b.parcial = b.questoes.some((q) => state.selecionadas.has(q.id));
+              const todas = b.questoes.every((q) => state.selecionadas.has(q.id));
+              const cor = cores.get(b.grupo);
+              return molduraBloco(b, todas, b.questoes.map((q) => itemQuestaoMontar(q, true, cor)).join(""), true, cor);
+            }).join("");
+          })()}
           ${aplicarFiltro(questoes, state.filtroMontar).length === 0 ? `<div class="card muted" style="text-align:center; padding:24px; font-size:12.5px;">${corners()}Nenhuma questão com esse filtro.</div>` : ""}
         </div>
 
@@ -1453,6 +1493,7 @@ function renderSimular() {
     indice.get(g).questoes.push(q);
   }
   const numero = (q) => s.questoes.indexOf(q) + 1;
+  const cores = coresDosBlocos(paginas);
 
   content.innerHTML = `
     <div style="margin-bottom:6px;"><a href="#" id="voltar-montar" class="mono muted" style="font-size:12px;">← voltar e ajustar o TDE</a></div>
@@ -1477,7 +1518,9 @@ function renderSimular() {
         <div class="card" style="margin-bottom:16px;">
           ${corners()}
           <div class="row" style="align-items:flex-start;">
-            <span class="pill">${bloco ? `Página ${ip + 1} · bloco ${pg.grupo} · ${pg.questoes.length} questões` : `Página ${ip + 1} · ${pg.questoes[0].tema}`}</span>
+            ${bloco
+              ? `<span class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; font-weight:600; padding:3px 8px; color:rgb(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb}); border:1px solid rgba(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb},.5); background:rgba(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb},.08);">Página ${ip + 1} · bloco ${pg.grupo} · ${pg.questoes.length} questões</span>`
+              : `<span class="pill">Página ${ip + 1} · ${pg.questoes[0].tema}</span>`}
           </div>
           ${figura ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:300px; width:auto; height:auto; display:block; margin:12px auto 0; border:1px solid var(--line-faint);" />` : ""}
           ${comum ? `<div style="font-size:14px; line-height:1.7; margin-top:12px; padding:10px 12px; background:rgba(79,209,197,.06); border-left:3px solid var(--teal);">${formatarEnunciado(comum)}</div>` : ""}
