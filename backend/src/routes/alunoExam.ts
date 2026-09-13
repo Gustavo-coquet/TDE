@@ -11,6 +11,9 @@ function mapQuestoes(questoes: any[]) {
     tema: `${q.questao.disciplina} — ${q.questao.assunto}`,
     enunciado: q.enunciadoFinal,
     imagem: q.questao.imagem,
+    // grupo do bloco: as questões encadeadas compartilham UMA figura. Só a dona carrega o
+    // base64; as outras vêm com imagem nula e o aluno.js acha a figura pelo grupo.
+    grupo: q.questao.grupoVariaveis,
     formatoResposta: q.questao.formatoResposta,
     respostaAlunoLetra: q.respostaAlunoLetra,
     alternativas: (q.alternativasFinal as any[]).map((a) => ({ letra: a.letra, campos: a.campos })), // sem "correta"
