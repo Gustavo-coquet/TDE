@@ -65,6 +65,73 @@ function aplicarFiltro(questoes, filtro) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// BLOCOS de questões encadeadas
+// Questões com o MESMO "grupoVariaveis" recebem os mesmos valores sorteados: uma pede a
+// reação de apoio, a outra o cortante que sai dela, a outra o momento. Sozinhas elas não
+// fazem sentido, e mandar só uma pro TDE deixaria o aluno sem o encadeamento. Por isso
+// aqui elas aparecem dentro de uma moldura só e entram/saem da prova em bloco.
+function blocosDe(filtradas, todas) {
+  // se o filtro pegou parte de um bloco, o bloco inteiro vem junto — encadeadas não se separam
+  const gruposVisiveis = new Set(filtradas.map((q) => q.grupoVariaveis).filter(Boolean));
+  const lista = todas.filter((q) => filtradas.includes(q) || gruposVisiveis.has(q.grupoVariaveis));
+  const blocos = [];
+  const indice = new Map();
+  for (const q of lista) {
+    const g = q.grupoVariaveis || null;
+    if (!g) { blocos.push({ grupo: null, questoes: [q] }); continue; }
+    if (!indice.has(g)) { const b = { grupo: g, questoes: [] }; indice.set(g, b); blocos.push(b); }
+    indice.get(g).questoes.push(q);
+  }
+  return blocos;
+}
+
+// moldura do bloco: usada no Novo TDE (clicável, marca tudo) e no Banco (só visual)
+function molduraBloco(b, ativo, dentro, clicavel) {
+  return `
+    <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid ${ativo ? "var(--teal-dim)" : "var(--line)"};
+         border-left:3px solid ${ativo ? "var(--teal)" : "var(--line)"};
+         background:${ativo ? "rgba(79,209,197,.05)" : "var(--surface)"};
+         padding:11px 12px 3px; margin-bottom:12px; ${clicavel ? "cursor:pointer;" : ""}">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        ${clicavel ? `<div class="checkbox ${ativo ? "on" : ""}">${ativo ? "✓" : (b.parcial ? "–" : "")}</div>` : ""}
+        <div style="flex:1; min-width:0;">
+          <div class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--teal);">
+            Bloco encadeado · ${b.grupo}
+          </div>
+          <div class="mono muted" style="font-size:11px; margin-top:2px;">
+            ${b.questoes.length} questões — mesmos valores sorteados, entram e saem juntas
+          </div>
+        </div>
+      </div>
+      ${dentro}
+    </div>`;
+}
+
+// uma questão na lista do Novo TDE. Dentro de um bloco ela não repete disciplina/assunto
+// (são iguais nas 12) e não é clicável sozinha — quem manda é a moldura.
+function itemQuestaoMontar(q, dentroDeBloco) {
+  const sel = state.selecionadas.has(q.id);
+  const marca = sel ? (state.embaralharQuestoes ? "✓" : String(Array.from(state.selecionadas).indexOf(q.id) + 1)) : "";
+  const cabeca = dentroDeBloco ? "" : `
+                    <div style="min-width:0;">
+                      <div class="mono muted" style="font-size:10.5px;">${q.disciplina}</div>
+                      <div style="font-weight:600; font-size:13.5px;">${q.assunto}</div>
+                    </div>`;
+  return `
+            <div class="list-item ${sel ? "checked" : ""}" ${dentroDeBloco ? "" : `data-toggle-questao="${q.id}"`}
+                 style="align-items:flex-start; ${dentroDeBloco ? "background:var(--surface-raised); cursor:inherit;" : ""}">
+              <div class="checkbox ${sel ? "on" : ""}" style="margin-top:2px;">${marca}</div>
+              <div style="flex:1; min-width:0;">
+                <div class="row" style="align-items:flex-start; gap:8px;">
+                  ${cabeca}
+                  <div class="dots" style="flex-shrink:0; margin-left:auto;">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
+                </div>
+                <div class="mono muted" style="font-size:11px; margin-top:${dentroDeBloco ? "0" : "6px"}; line-height:1.5; max-height:54px; overflow:hidden;">${formatarEnunciado(q.preview && q.preview.enunciado ? q.preview.enunciado : q.enunciado)}</div>
+              </div>
+            </div>`;
+}
+
 // monta a barra de filtros (Disciplina / Assunto / busca) reutilizada no Banco e no Novo TDE
 function renderBarraFiltro(idPrefix, questoes, filtro) {
   const disciplinas = disciplinasDe(questoes);
@@ -628,19 +695,22 @@ async function renderBanco(mostrarForm) {
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       <div>
         <div class="mono muted" style="font-size:11px; margin-bottom:8px;">${filtradas.length} de ${questoes.length} questões</div>
-        ${filtradas.map((q) => `
-          <div class="card" style="margin-bottom:10px; cursor:pointer;" data-questao="${q.id}">
+        ${blocosDe(filtradas, questoes).map((b) => {
+          const cartao = (q, dentro) => `
+          <div class="card" style="margin-bottom:10px; cursor:pointer; ${dentro ? "background:var(--surface-raised);" : ""}" data-questao="${q.id}">
             ${corners()}
             <div class="row">
               <div>
-                <span class="pill" style="margin-bottom:6px;">${q.disciplina}</span>
-                <div style="font-weight:600; font-size:13.5px; margin-top:6px;">${q.assunto}</div>
+                ${dentro ? "" : `<span class="pill" style="margin-bottom:6px;">${q.disciplina}</span>`}
+                <div style="font-weight:600; font-size:13.5px; margin-top:${dentro ? "0" : "6px"};">${dentro ? q.formatoResposta || q.assunto : q.assunto}</div>
               </div>
-              <div class="dots">${[1,2,3,4,5].map(i => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
+              <div class="dots">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
             </div>
             <div class="mono muted" style="font-size:11.5px; margin-top:8px; line-height:1.6;">${formatarEnunciado(q.preview.enunciado)}</div>
-          </div>
-        `).join("")}
+          </div>`;
+          if (!b.grupo) return cartao(b.questoes[0], false);
+          return molduraBloco(b, false, b.questoes.map((q) => cartao(q, true)).join(""), false);
+        }).join("")}
         ${filtradas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px;">${corners()}Nenhuma questão encontrada com esse filtro.</div>` : ""}
       </div>
       <div id="preview-pane">
@@ -1132,21 +1202,12 @@ async function renderMontar() {
         <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:10px;">Questões (${state.selecionadas.size} selecionadas de ${questoes.length} no banco)</div>
         ${renderBarraFiltro("montar", questoes, state.filtroMontar)}
         <div id="lista-questoes">
-          ${aplicarFiltro(questoes, state.filtroMontar).map((q) => `
-            <div class="list-item ${state.selecionadas.has(q.id) ? "checked" : ""}" data-toggle-questao="${q.id}" style="align-items:flex-start;">
-              <div class="checkbox ${state.selecionadas.has(q.id) ? "on" : ""}" style="margin-top:2px;">${state.selecionadas.has(q.id) ? (state.embaralharQuestoes ? "✓" : String(Array.from(state.selecionadas).indexOf(q.id) + 1)) : ""}</div>
-              <div style="flex:1; min-width:0;">
-                <div class="row" style="align-items:flex-start; gap:8px;">
-                  <div style="min-width:0;">
-                    <div class="mono muted" style="font-size:10.5px;">${q.disciplina}</div>
-                    <div style="font-weight:600; font-size:13.5px;">${q.assunto}</div>
-                  </div>
-                  <div class="dots" style="flex-shrink:0;">${[1,2,3,4,5].map(i => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
-                </div>
-                <div class="mono muted" style="font-size:11px; margin-top:6px; line-height:1.5; max-height:54px; overflow:hidden;">${formatarEnunciado(q.preview && q.preview.enunciado ? q.preview.enunciado : q.enunciado)}</div>
-              </div>
-            </div>
-          `).join("")}
+          ${blocosDe(aplicarFiltro(questoes, state.filtroMontar), questoes).map((b) => {
+            if (!b.grupo) return itemQuestaoMontar(b.questoes[0], false);
+            b.parcial = b.questoes.some((q) => state.selecionadas.has(q.id));
+            const todas = b.questoes.every((q) => state.selecionadas.has(q.id));
+            return molduraBloco(b, todas, b.questoes.map((q) => itemQuestaoMontar(q, true)).join(""), true);
+          }).join("")}
           ${aplicarFiltro(questoes, state.filtroMontar).length === 0 ? `<div class="card muted" style="text-align:center; padding:24px; font-size:12.5px;">${corners()}Nenhuma questão com esse filtro.</div>` : ""}
         </div>
 
@@ -1218,6 +1279,17 @@ async function renderMontar() {
     el.addEventListener("click", () => {
       const id = el.dataset.toggleQuestao;
       state.selecionadas.has(id) ? state.selecionadas.delete(id) : state.selecionadas.add(id);
+      redesenhar();
+    });
+  });
+  // clique em qualquer lugar do bloco marca/desmarca as questões encadeadas DE UMA VEZ.
+  // Elas são adicionadas na ordem do banco, então a numeração da ordem fixa sai certa.
+  content.querySelectorAll("[data-toggle-bloco]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const grupo = el.dataset.toggleBloco;
+      const doBloco = questoes.filter((q) => (q.grupoVariaveis || null) === grupo);
+      const todas = doBloco.every((q) => state.selecionadas.has(q.id));
+      doBloco.forEach((q) => (todas ? state.selecionadas.delete(q.id) : state.selecionadas.add(q.id)));
       redesenhar();
     });
   });
