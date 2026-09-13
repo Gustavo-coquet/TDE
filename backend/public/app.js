@@ -1511,6 +1511,12 @@ function renderSimular() {
     ${paginas.map((pg, ip) => {
       const bloco = pg.questoes.length > 1;
       const figura = figuraDe(pg.questoes[0], s.questoes);
+      // igual ao aluno.js: dentro de um bloco a figura se repete acima de cada pergunta,
+      // pra ninguem precisar rolar de volta ao topo. Mesmo data URL em todas as tags.
+      const imgFigura = (margem) =>
+        figura
+          ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:300px; width:auto; height:auto; display:block; margin:${margem}; border:1px solid var(--line-faint);" />`
+          : "";
       const comum = sufixoComum(pg.questoes.map((q) => q.enunciado));
       const especifico = (q) =>
         comum && q.enunciado.endsWith(comum) ? q.enunciado.slice(0, q.enunciado.length - comum.length).trimEnd() : q.enunciado;
@@ -1522,7 +1528,7 @@ function renderSimular() {
               ? `<span class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; font-weight:600; padding:3px 8px; color:rgb(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb}); border:1px solid rgba(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb},.5); background:rgba(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb},.08);">Página ${ip + 1} · bloco ${pg.grupo} · ${pg.questoes.length} questões</span>`
               : `<span class="pill">Página ${ip + 1} · ${pg.questoes[0].tema}</span>`}
           </div>
-          ${figura ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:300px; width:auto; height:auto; display:block; margin:12px auto 0; border:1px solid var(--line-faint);" />` : ""}
+          ${bloco ? "" : imgFigura("12px auto 0")}
           ${comum ? `<div style="font-size:14px; line-height:1.7; margin-top:12px; padding:10px 12px; background:rgba(79,209,197,.06); border-left:3px solid var(--teal);">${formatarEnunciado(comum)}</div>` : ""}
           ${pg.questoes.map((q, i) => {
             const params = Object.entries(q.parametros || {})
@@ -1535,6 +1541,7 @@ function renderSimular() {
                   <span class="mono muted" style="font-size:11px;">QUESTÃO ${numero(q)} de ${s.questoes.length}</span>
                   <span class="mono" style="font-size:11px; color:var(--green);">resposta ${q.respostaCorretaLetra}</span>
                 </div>
+                ${bloco ? imgFigura("10px auto 0") : ""}
                 <div style="font-size:14.5px; line-height:1.7; margin-top:8px;">${formatarEnunciado(especifico(q))}</div>
                 <div style="margin-top:12px;">${renderAlternativasPreview(q.alternativas, q.formatoResposta)}</div>
                 <details style="margin-top:10px;">
