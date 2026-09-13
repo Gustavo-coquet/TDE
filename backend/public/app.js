@@ -79,6 +79,22 @@ function figuraDe(q, todas) {
   return dona ? dona.imagem : null;
 }
 
+// O "Dados: ..." é igual em todas as questões de um bloco. Na simulação (e na prova do
+// aluno) ele aparece UMA vez no topo: achamos o maior trecho final comum aos enunciados.
+// Não precisa de marcador no texto — é deduzido do próprio enunciado.
+function sufixoComum(textos) {
+  if (textos.length < 2) return "";
+  const menor = Math.min(...textos.map((t) => t.length));
+  let n = 0;
+  while (n < menor && textos.every((t) => t[t.length - 1 - n] === textos[0][textos[0].length - 1 - n])) n++;
+  if (n < 40) return "";
+  let comum = textos[0].slice(textos[0].length - n);
+  const quebra = comum.indexOf("\n");
+  if (quebra < 0) return "";
+  comum = comum.slice(quebra + 1);
+  return comum.trim().length >= 30 ? comum : "";
+}
+
 // ---------------------------------------------------------------------------
 // BLOCOS de questões encadeadas
 // Questões com o MESMO "grupoVariaveis" recebem os mesmos valores sorteados: uma pede a
@@ -1427,12 +1443,23 @@ async function renderMontar() {
 function renderSimular() {
   const s = state.simulacao;
   if (!s) { setView("montar"); return; }
+  // mesmas páginas que o aluno vai ver: bloco encadeado = uma página em cascata
+  const paginas = [];
+  const indice = new Map();
+  for (const q of s.questoes) {
+    const g = q.grupo || null;
+    if (!g) { paginas.push({ grupo: null, questoes: [q] }); continue; }
+    if (!indice.has(g)) { const pg = { grupo: g, questoes: [] }; indice.set(g, pg); paginas.push(pg); }
+    indice.get(g).questoes.push(q);
+  }
+  const numero = (q) => s.questoes.indexOf(q) + 1;
+
   content.innerHTML = `
     <div style="margin-bottom:6px;"><a href="#" id="voltar-montar" class="mono muted" style="font-size:12px;">← voltar e ajustar o TDE</a></div>
     <div class="eyebrow" style="color:var(--amber);">SIMULAÇÃO · NADA FOI SALVO</div>
     <h1 style="margin-bottom:4px;">Como um aluno veria este TDE</h1>
     <div class="mono muted" style="font-size:12px; margin-bottom:14px;">
-      ${s.questoes.length} ${s.questoes.length === 1 ? "questão" : "questões"} ·
+      ${s.questoes.length} ${s.questoes.length === 1 ? "questão" : "questões"} em ${paginas.length} ${paginas.length === 1 ? "página" : "páginas"} ·
       ${state.embaralharQuestoes ? "ordem sorteada" : "ordem definida por você"} ·
       a alternativa correta está destacada
     </div>
@@ -1440,26 +1467,39 @@ function renderSimular() {
       <button class="btn subtle" id="btn-outro-aluno">Sortear outro aluno</button>
       <span class="mono muted" style="font-size:11px;">outro sorteio dos valores, das alternativas e da ordem</span>
     </div>
-    ${s.questoes.map((q, i) => {
-      const figura = figuraDe(q, s.questoes);
-      const params = Object.entries(q.parametros || {})
-        .filter(([, v]) => typeof v === "number")
-        .map(([k, v]) => `${k} = ${formatarBR(v)}`)
-        .join("   ·   ");
+    ${paginas.map((pg, ip) => {
+      const bloco = pg.questoes.length > 1;
+      const figura = figuraDe(pg.questoes[0], s.questoes);
+      const comum = sufixoComum(pg.questoes.map((q) => q.enunciado));
+      const especifico = (q) =>
+        comum && q.enunciado.endsWith(comum) ? q.enunciado.slice(0, q.enunciado.length - comum.length).trimEnd() : q.enunciado;
       return `
-        <div class="card" style="margin-bottom:14px;">
+        <div class="card" style="margin-bottom:16px;">
           ${corners()}
           <div class="row" style="align-items:flex-start;">
-            <span class="pill">${i + 1} de ${s.questoes.length} — ${q.tema}</span>
-            <span class="mono" style="font-size:11px; color:var(--green);">resposta ${q.respostaCorretaLetra}</span>
+            <span class="pill">${bloco ? `Página ${ip + 1} · bloco ${pg.grupo} · ${pg.questoes.length} questões` : `Página ${ip + 1} · ${pg.questoes[0].tema}`}</span>
           </div>
           ${figura ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:300px; width:auto; height:auto; display:block; margin:12px auto 0; border:1px solid var(--line-faint);" />` : ""}
-          <div style="font-size:14.5px; line-height:1.7; margin-top:12px;">${formatarEnunciado(q.enunciado)}</div>
-          <div style="margin-top:14px;">${renderAlternativasPreview(q.alternativas, q.formatoResposta)}</div>
-          <details style="margin-top:12px;">
-            <summary class="mono muted" style="font-size:11px; cursor:pointer;">valores sorteados e etapas</summary>
-            <div class="mono muted" style="font-size:11px; line-height:1.8; margin-top:6px; word-break:break-word;">${params}</div>
-          </details>
+          ${comum ? `<div style="font-size:14px; line-height:1.7; margin-top:12px; padding:10px 12px; background:rgba(79,209,197,.06); border-left:3px solid var(--teal);">${formatarEnunciado(comum)}</div>` : ""}
+          ${pg.questoes.map((q, i) => {
+            const params = Object.entries(q.parametros || {})
+              .filter(([, v]) => typeof v === "number")
+              .map(([k, v]) => `${k} = ${formatarBR(v)}`)
+              .join("   ·   ");
+            return `
+              <div style="margin-top:${i === 0 && !comum && !figura ? "12px" : "18px"}; ${bloco ? "border-top:1px solid var(--line-faint); padding-top:14px;" : ""}">
+                <div class="row" style="align-items:flex-start;">
+                  <span class="mono muted" style="font-size:11px;">QUESTÃO ${numero(q)} de ${s.questoes.length}</span>
+                  <span class="mono" style="font-size:11px; color:var(--green);">resposta ${q.respostaCorretaLetra}</span>
+                </div>
+                <div style="font-size:14.5px; line-height:1.7; margin-top:8px;">${formatarEnunciado(especifico(q))}</div>
+                <div style="margin-top:12px;">${renderAlternativasPreview(q.alternativas, q.formatoResposta)}</div>
+                <details style="margin-top:10px;">
+                  <summary class="mono muted" style="font-size:11px; cursor:pointer;">valores sorteados</summary>
+                  <div class="mono muted" style="font-size:11px; line-height:1.8; margin-top:6px; word-break:break-word;">${params}</div>
+                </details>
+              </div>`;
+          }).join("")}
         </div>`;
     }).join("")}
     <button class="btn subtle" id="voltar-montar-2" style="width:100%; justify-content:center;">← voltar e ajustar o TDE</button>
