@@ -122,7 +122,19 @@ questoesRouter.put("/:id", asyncHandler(async (req, res) => {
     },
   });
 
-  res.json(questao);
+  // Um bloco (mesmo grupoVariaveis) e um unico exercicio dividido em varias perguntas:
+  // disciplina e assunto valem para o bloco inteiro. Ao editar qualquer questao do bloco,
+  // as irmas acompanham, senao o bloco aparece quebrado em assuntos diferentes na listagem.
+  let irmasAtualizadas = 0;
+  if (questao.grupoVariaveis) {
+    const r = await prisma.questao.updateMany({
+      where: { grupoVariaveis: questao.grupoVariaveis, id: { not: questao.id } },
+      data: { disciplina: questao.disciplina, assunto: questao.assunto },
+    });
+    irmasAtualizadas = r.count;
+  }
+
+  res.json({ ...questao, irmasAtualizadas });
 }));
 
 // DELETE /api/questoes/:id
