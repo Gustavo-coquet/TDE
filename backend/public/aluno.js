@@ -282,6 +282,13 @@ function renderProva() {
   const bloco = pg.questoes.length > 1;
 
   const figura = figuraDe(pg.questoes[0], p.questoes);
+  // A figura se repete acima de CADA pergunta do bloco. O mesmo data URL em todas as
+  // tags: o navegador decodifica a imagem uma vez e reusa, entao nao pesa nada. O aluno
+  // responde a pergunta olhando pra viga, sem ter que voltar o scroll ate o topo.
+  const imgFigura = (margem) =>
+    figura
+      ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:320px; width:auto; height:auto; display:block; margin:${margem}; border:1px solid var(--line-faint); cursor:zoom-in;" onclick="window.open('${figura}', '_blank')" title="Clique para ampliar" />`
+      : "";
   const comum = sufixoComum(pg.questoes.map((q) => q.enunciado));
   const especifico = (q) =>
     comum && q.enunciado.endsWith(comum) ? q.enunciado.slice(0, q.enunciado.length - comum.length).trimEnd() : q.enunciado;
@@ -323,7 +330,7 @@ function renderProva() {
         <span class="pill">${pg.questoes[0].tema}</span>
         ${bloco ? `<span class="mono muted" style="font-size:11px;" id="contador-pagina">${respondidasAqui} de ${pg.questoes.length} respondidas</span>` : ""}
       </div>
-      ${figura ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:320px; width:auto; height:auto; display:block; margin:14px auto 0; border:1px solid var(--line-faint); cursor:zoom-in;" onclick="window.open('${figura}', '_blank')" title="Clique para ampliar" />` : ""}
+      ${bloco ? "" : imgFigura("14px auto 0")}
       ${comum ? `<div style="font-size:15px; line-height:1.7; margin-top:14px; padding:12px 14px; background:rgba(79,209,197,.06); border-left:3px solid var(--teal);">${formatarEnunciado(comum)}</div>` : ""}
       ${pg.questoes
         .map(
@@ -332,6 +339,7 @@ function renderProva() {
             bloco ? "border-top:1px solid var(--line-faint); padding-top:16px;" : ""
           }">
           ${bloco ? `<div class="mono" id="rot-${q.id}" style="font-size:11px; color:${state.respostas[q.id] ? "var(--teal)" : "var(--ink-faint)"}; margin-bottom:8px;">QUESTÃO ${numero(q)}${state.respostas[q.id] ? " · respondida" : ""}</div>` : ""}
+          ${bloco ? imgFigura("0 auto 14px") : ""}
           <div style="font-size:15.5px; line-height:1.7;">${formatarEnunciado(especifico(q))}</div>
           <div style="margin-top:14px;">
             ${q.alternativas
