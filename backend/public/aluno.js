@@ -83,6 +83,20 @@ function textoAlternativa(campos, formato, comFormatacao = true) {
   return campos.map((c) => `${fmt(c.nome)} = ${fmt(formatarValorCampo(c.valor, c))} ${fmt(c.unidade)}`).join("   |   ");
 }
 
+// ---------------------------------------------------------------------------
+// FIGURA DO BLOCO
+// As questões encadeadas de um mesmo grupo são a mesma figura. Em vez de subir o mesmo
+// arquivo 14 vezes (e guardar 14 cópias do base64 no banco e no JSON que trafega), só
+// UMA questão do grupo carrega a imagem — as outras encontram a dela aqui, na hora de
+// exibir. Nada é copiado: o campo "imagem" das outras continua vazio no banco.
+function figuraDe(q, todas) {
+  if (q.imagem) return q.imagem;
+  const g = q.grupoVariaveis || q.grupo || null;
+  if (!g || !Array.isArray(todas)) return null;
+  const dona = todas.find((o) => (o.grupoVariaveis || o.grupo) === g && o.imagem);
+  return dona ? dona.imagem : null;
+}
+
 async function api(path, options) {
   const res = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json" }, ...options });
   if (!res.ok) {
@@ -242,7 +256,7 @@ function renderProva() {
     <div class="card">
       <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
       <span class="pill">${q.tema}</span>
-      ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 420px); max-height:320px; width:auto; height:auto; display:block; margin:14px auto 0; border:1px solid var(--line-faint); cursor:zoom-in;" onclick="window.open('${q.imagem}', '_blank')" title="Clique para ampliar" />` : ""}
+      ${figuraDe(q, p.questoes) ? `<img src="${figuraDe(q, p.questoes)}" style="max-width:min(100%, 420px); max-height:320px; width:auto; height:auto; display:block; margin:14px auto 0; border:1px solid var(--line-faint); cursor:zoom-in;" onclick="window.open('${figuraDe(q, p.questoes)}', '_blank')" title="Clique para ampliar" />` : ""}
       <div style="font-size:15.5px; line-height:1.7; margin-top:14px;">${formatarEnunciado(q.enunciado)}</div>
       <div style="margin-top:18px;">
         ${q.alternativas.map((a) => `
