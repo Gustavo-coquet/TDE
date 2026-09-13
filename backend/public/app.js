@@ -66,6 +66,20 @@ function aplicarFiltro(questoes, filtro) {
 }
 
 // ---------------------------------------------------------------------------
+// FIGURA DO BLOCO
+// As questões encadeadas de um mesmo grupo são a mesma figura. Em vez de subir o mesmo
+// arquivo 14 vezes (e guardar 14 cópias do base64 no banco e no JSON que trafega), só
+// UMA questão do grupo carrega a imagem — as outras encontram a dela aqui, na hora de
+// exibir. Nada é copiado: o campo "imagem" das outras continua vazio no banco.
+function figuraDe(q, todas) {
+  if (q.imagem) return q.imagem;
+  const g = q.grupoVariaveis || q.grupo || null;
+  if (!g || !Array.isArray(todas)) return null;
+  const dona = todas.find((o) => (o.grupoVariaveis || o.grupo) === g && o.imagem);
+  return dona ? dona.imagem : null;
+}
+
+// ---------------------------------------------------------------------------
 // BLOCOS de questões encadeadas
 // Questões com o MESMO "grupoVariaveis" recebem os mesmos valores sorteados: uma pede a
 // reação de apoio, a outra o cortante que sai dela, a outra o momento. Sozinhas elas não
@@ -135,7 +149,8 @@ function itemQuestaoMontar(q, dentroDeBloco) {
               <div style="flex:1; min-width:0;">
                 <div class="row" style="align-items:flex-start; gap:8px;">
                   ${cabeca}
-                  <div class="dots" style="flex-shrink:0; margin-left:auto;">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
+                  ${dentroDeBloco && q.imagem ? `<span class="mono" style="flex-shrink:0; font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--amber); border:1px solid rgba(232,163,61,.5); padding:1px 5px; margin-left:auto;">figura do bloco</span>` : ""}
+                  <div class="dots" style="flex-shrink:0; ${dentroDeBloco && q.imagem ? "margin-left:8px;" : "margin-left:auto;"}">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
                 </div>
                 <div class="mono muted" style="font-size:11px; margin-top:${dentroDeBloco ? "0" : "6px"}; line-height:1.5; max-height:54px; overflow:hidden;">${formatarEnunciado(q.preview && q.preview.enunciado ? q.preview.enunciado : q.enunciado)}</div>
               </div>
@@ -747,13 +762,14 @@ async function renderBanco(mostrarForm) {
   content.querySelectorAll("[data-questao]").forEach((el) => {
     el.addEventListener("click", () => {
       const q = questoes.find((x) => x.id === el.dataset.questao);
+      const figura = figuraDe(q, questoes);
       document.getElementById("preview-pane").innerHTML = `
         <div class="card accent-amber">
           ${corners()}
           <span class="pill amber">Preview parametrizado</span>
           <div class="mono muted" style="font-size:11px; margin-top:12px;">${q.disciplina}</div>
           <div style="font-weight:600; font-size:15px; margin-top:2px;">${q.assunto}</div>
-          ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-top:10px; border:1px solid var(--line-faint);" />` : ""}
+          ${figura ? `<img src="${figura}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-top:10px; border:1px solid var(--line-faint);" />${q.imagem ? "" : `<div class="mono" style="font-size:10.5px; color:var(--amber); margin-top:4px;">figura herdada do bloco ${q.grupoVariaveis}</div>`}` : ""}
           <div style="font-size:13.5px; margin-top:10px; line-height:1.6;">${formatarEnunciado(q.preview.enunciado)}</div>
           ${q.preview.erro
             ? `<div class="mono" style="color:var(--red); font-size:12px; margin-top:10px;">Erro: ${q.preview.erro}</div>`
@@ -875,6 +891,7 @@ function renderFormNovaQuestao(container) {
         <label>Imagem / esquema (opcional — diagrama, desenho da viga, circuito, etc.)</label>
         <input type="file" id="nq-imagem" accept="image/*" />
         <div id="nq-imagem-preview" style="margin-top:8px;"></div>
+        <div class="hint">Se esta questão fizer parte de um bloco, basta subir a figura em <b>uma</b> delas — as outras usam a mesma automaticamente. Não suba 14 vezes: cada cópia vira um base64 inteiro no banco.</div>
       </div>
       <div class="field">
         <label>Formatação — selecione um trecho do enunciado e clique no botão</label>
@@ -919,6 +936,14 @@ function renderFormNovaQuestao(container) {
       <div class="field">
         <label>Grupo de variáveis (opcional — pra encadear questões sobre a mesma peça)</label>
         <input id="nq-grupo" value="${attr(dados.grupoVariaveis || "")}" placeholder="Ex: figura-ancora" class="mono" />
+        ${(() => {
+          const g = dados.grupoVariaveis;
+          if (!g || state.novaQuestaoImagem) return "";
+          const dona = (state.questoes || []).find((o) => o.grupoVariaveis === g && o.imagem);
+          return dona
+            ? `<div class="hint" style="color:var(--amber);">Esta questão vai usar a figura já enviada no bloco <b>${g}</b>. Deixe o campo de imagem vazio.</div>`
+            : `<div class="hint" style="color:var(--amber);">Nenhuma questão do bloco <b>${g}</b> tem figura ainda. Suba a figura aqui e as outras herdam.</div>`;
+        })()}
         <div class="hint">Questões com o MESMO grupo, dentro de um mesmo TDE, recebem os mesmos valores sorteados nas variáveis de mesmo nome — então falam da mesma peça. Útil quando a 2ª questão precisa do resultado da 1ª. Elas também ficam sempre juntas e na ordem definida, mesmo no modo aleatório. Deixe vazio para a questão ser independente.</div>
       </div>
 
@@ -1144,8 +1169,9 @@ function renderFormNovaQuestao(container) {
     if (erroValidacao) { erroEl.innerHTML = `<div class="error-box">${erroValidacao}</div>`; return; }
     try {
       const resultado = await api("/questoes/testar", { method: "POST", body: JSON.stringify(q) });
+      const figuraTeste = figuraDe({ imagem: q.imagem, grupoVariaveis: q.grupoVariaveis }, state.questoes);
       previewEl.innerHTML = `<div class="ok-box">
-        ${q.imagem ? `<img src="${q.imagem}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-bottom:10px; border:1px solid var(--line-faint);" />` : ""}
+        ${figuraTeste ? `<img src="${figuraTeste}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-bottom:10px; border:1px solid var(--line-faint);" />` : ""}
         <div style="margin-bottom:10px;">${formatarEnunciado(resultado.enunciado)}</div>
         ${renderAlternativasPreview(resultado.alternativas, q.formatoResposta)}
       </div>`;
