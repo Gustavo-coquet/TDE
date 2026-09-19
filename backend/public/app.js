@@ -1681,6 +1681,7 @@ async function renderResultados() {
                 ${a.nota !== null ? formatarBR(+a.nota.toFixed(2)) : "—"}
               </span>
               <button class="btn subtle" style="font-size:10.5px; padding:3px 8px;" data-editar-nota="${a.alunoId}" data-nota-atual="${a.nota !== null ? a.nota : ""}" data-tem-manual="${a.notaManual !== null}">Alterar</button>
+              ${a.status !== "gerada" || a.respondidas > 0 ? `<button class="btn subtle" style="font-size:10.5px; padding:3px 8px; color:var(--red); border-color:rgba(255,107,107,.45);" data-zerar="${a.alunoId}" data-nome="${a.alunoNome.replace(/"/g, "&quot;")}">Zerar</button>` : ""}
             </div>
           </div>
           ${a.notaManual !== null && a.motivoNotaManual ? `<div class="mono muted" style="font-size:10.5px; margin-top:4px;">motivo: ${a.motivoNotaManual}</div>` : ""}
@@ -1701,7 +1702,8 @@ async function renderResultados() {
       const notaAtual = el.dataset.notaAtual;
       const temManual = el.dataset.temManual === "true";
       const alvo = document.getElementById(`nota-${alunoId}`);
-      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+      if (alvo.dataset.painel === "nota") { alvo.innerHTML = ""; alvo.dataset.painel = ""; return; } // clique de novo fecha
+      alvo.dataset.painel = "nota";
 
       alvo.innerHTML = `
         <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -1748,6 +1750,44 @@ async function renderResultados() {
         } catch (e) {
           document.getElementById(`erro-nota-${alunoId}`).innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
           ev.target.disabled = false;
+        }
+      });
+    });
+  });
+
+  // Zerar tentativas: apaga todas as tentativas do aluno neste TDE e gera a tentativa 1 de novo.
+  // Pede confirmacao na propria linha, igual ao "Alterar" (nada de janela de confirmacao do navegador).
+  content.querySelectorAll("[data-zerar]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const alunoId = el.dataset.zerar;
+      const nome = el.dataset.nome;
+      const alvo = document.getElementById(`nota-${alunoId}`);
+      if (alvo.dataset.painel === "zerar") { alvo.innerHTML = ""; alvo.dataset.painel = ""; return; } // clique de novo fecha
+      alvo.dataset.painel = "zerar";
+      alvo.innerHTML = `
+        <div style="margin-top:8px; padding:10px; background:rgba(255,107,107,.06); border:1px solid rgba(255,107,107,.35); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:12.5px; flex:1; min-width:220px;">Zerar as tentativas de <b>${nome}</b>? As respostas, a nota e qualquer ajuste manual deste aluno neste TDE serão apagados, e ele volta a ter a prova sem nenhuma resposta, como tentativa 1.</span>
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px; color:var(--red); border-color:rgba(255,107,107,.55);" data-confirmar-zerar="${alunoId}">Sim, zerar</button>
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-cancelar-zerar="${alunoId}">Cancelar</button>
+          <span id="erro-zerar-${alunoId}" style="width:100%;"></span>
+        </div>
+      `;
+      document.querySelector(`[data-cancelar-zerar="${alunoId}"]`).addEventListener("click", () => {
+        alvo.innerHTML = ""; alvo.dataset.painel = "";
+      });
+      document.querySelector(`[data-confirmar-zerar="${alunoId}"]`).addEventListener("click", async (ev) => {
+        ev.target.disabled = true;
+        ev.target.textContent = "Zerando...";
+        try {
+          await api(`/provas-mestre/${state.provaAtualId}/zerar-tentativas`, {
+            method: "POST",
+            body: JSON.stringify({ alunoId }),
+          });
+          renderResultados();
+        } catch (e) {
+          document.getElementById(`erro-zerar-${alunoId}`).innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+          ev.target.disabled = false;
+          ev.target.textContent = "Sim, zerar";
         }
       });
     });
