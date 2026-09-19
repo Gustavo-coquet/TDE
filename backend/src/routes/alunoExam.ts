@@ -24,12 +24,96 @@ function prazoEncerrado(provaMestre: { prazoFinal: Date | null }) {
   return !!provaMestre.prazoFinal && new Date() > provaMestre.prazoFinal;
 }
 
+// ---------------------------------------------------------------------------------------
+// MODO PROFESSOR: na tela do aluno, em vez da matrícula, o professor digita o código mestre
+// (PROFESSOR_CODIGO_TDE, ou, se ele não existir, a mesma senha do painel: PROFESSOR_SENHA).
+// Funciona em QUALQUER TDE, de qualquer turma, como se o professor estivesse cadastrado.
+// A prova de teste fica só na memória do servidor: nada é gravado no banco, não conta
+// tentativa de ninguém e não aparece nos Resultados. Cada vez que é finalizada, a próxima
+// entrada sorteia uma prova nova (outros valores).
+// ---------------------------------------------------------------------------------------
+function ehCodigoProfessor(token: string) {
+  const codigo = process.env.PROFESSOR_CODIGO_TDE || process.env.PROFESSOR_SENHA;
+  return !!codigo && token === codigo;
+}
+
+type QuestaoPrevia = {
+  id: string;
+  ordem: number;
+  questao: any;
+  enunciadoFinal: string;
+  alternativasFinal: any;
+  respostaCorretaLetra: string;
+  respostaAlunoLetra: string | null;
+  correta: boolean | null;
+};
+type Previa = { tentativa: number; finalizada: boolean; questoes: QuestaoPrevia[] };
+const previas = new Map<string, Previa>();
+
+async function gerarPrevia(provaMestreId: string, tentativa: number): Promise<Previa | null> {
+  const provaMestre = await prisma.provaMestre.findUnique({
+    where: { id: provaMestreId },
+    include: { questoes: { include: { questao: true }, orderBy: { ordem: "asc" } } },
+  });
+  if (!provaMestre) return null;
+  const questoesBase = provaMestre.questoes.map((pmq) => ({
+    id: pmq.questao.id,
+    enunciado: pmq.questao.enunciado,
+    variaveis: pmq.questao.variaveis as any,
+    etapas: pmq.questao.etapas as any,
+    grupoVariaveis: pmq.questao.grupoVariaveis,
+  }));
+  const marca = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const { questoes } = gerarProvaIndividual(`${provaMestreId}:professor:${marca}`, "professor", questoesBase, provaMestre.embaralharQuestoes);
+  const porId = new Map<string, any>(provaMestre.questoes.map((pmq) => [pmq.questao.id, pmq.questao] as [string, any]));
+  const previa: Previa = {
+    tentativa,
+    finalizada: false,
+    questoes: [...questoes]
+      .sort((a, b) => a.ordem - b.ordem)
+      .map((q, i) => ({
+        id: `professor-${marca}-${i}`,
+        ordem: q.ordem,
+        questao: porId.get(q.questaoId),
+        enunciadoFinal: q.enunciadoFinal,
+        alternativasFinal: q.alternativasFinal,
+        respostaCorretaLetra: q.respostaCorretaLetra,
+        respostaAlunoLetra: null,
+        correta: null,
+      })),
+  };
+  if (previas.size > 100) previas.clear(); // só por segurança: é memória, não banco
+  previas.set(provaMestreId, previa);
+  return previa;
+}
+
+async function respostaPrevia(provaMestreId: string, previa: Previa) {
+  const provaMestre = await prisma.provaMestre.findUnique({ where: { id: provaMestreId } });
+  return {
+    estado: "em_andamento",
+    modoProfessor: true,
+    tentativa: previa.tentativa,
+    alunoNome: "Professor(a)",
+    tituloProva: provaMestre?.titulo ?? "",
+    prazoFinal: provaMestre?.prazoFinal ?? null,
+    valor: provaMestre?.valor ?? 10,
+    questoes: mapQuestoes(previa.questoes),
+  };
+}
+
 // GET /api/prova/:provaMestreId/:token -> estado atual do aluno nesse TDE
 // :token é a matrícula do aluno. Retorna um destes formatos:
 //  { estado: "em_andamento", tentativa, questoes: [...] }               -> aluno está resolvendo (nova ou retomando)
 //  { estado: "aguardando_decisao", melhorNota, tentativasFeitas, podeTentarDeNovo } -> já tem tentativa(s) finalizada(s)
 alunoExamRouter.get("/:provaMestreId/:token", asyncHandler(async (req, res) => {
   const { provaMestreId, token } = req.params;
+
+  if (ehCodigoProfessor(token)) {
+    let previa = previas.get(provaMestreId);
+    if (!previa || previa.finalizada) previa = (await gerarPrevia(provaMestreId, 1)) ?? undefined;
+    if (!previa) return res.status(404).json({ erro: "TDE não encontrado." });
+    return res.json(await respostaPrevia(provaMestreId, previa));
+  }
 
   const provaMestre = await prisma.provaMestre.findUnique({ where: { id: provaMestreId } });
   if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
@@ -86,6 +170,13 @@ alunoExamRouter.get("/:provaMestreId/:token", asyncHandler(async (req, res) => {
 // POST /api/prova/:provaMestreId/:token/nova-tentativa -> gera e inicia a 2ª tentativa
 alunoExamRouter.post("/:provaMestreId/:token/nova-tentativa", asyncHandler(async (req, res) => {
   const { provaMestreId, token } = req.params;
+
+  if (ehCodigoProfessor(token)) {
+    const anterior = previas.get(provaMestreId);
+    const previa = await gerarPrevia(provaMestreId, anterior ? Math.min(anterior.tentativa + 1, 2) : 1);
+    if (!previa) return res.status(404).json({ erro: "TDE não encontrado." });
+    return res.json(await respostaPrevia(provaMestreId, previa));
+  }
 
   const provaMestre = await prisma.provaMestre.findUnique({
     where: { id: provaMestreId },
@@ -156,6 +247,15 @@ alunoExamRouter.post("/:provaMestreId/:token/responder", asyncHandler(async (req
   const { provaMestreId, token } = req.params;
   const { provaIndividualQuestaoId, letra } = req.body;
 
+  if (ehCodigoProfessor(token)) {
+    const previa = previas.get(provaMestreId);
+    const q = previa && !previa.finalizada ? previa.questoes.find((x) => x.id === provaIndividualQuestaoId) : undefined;
+    if (!q) return res.status(400).json({ erro: "A prova de teste expirou (o servidor reiniciou). Recarregue a página." });
+    q.respostaAlunoLetra = letra;
+    q.correta = letra === q.respostaCorretaLetra;
+    return res.json({ ok: true });
+  }
+
   const provaMestre = await prisma.provaMestre.findUnique({ where: { id: provaMestreId } });
   if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
 
@@ -181,6 +281,36 @@ alunoExamRouter.post("/:provaMestreId/:token/responder", asyncHandler(async (req
 // POST /api/prova/:provaMestreId/:token/finalizar -> corrige automaticamente e retorna o resultado
 alunoExamRouter.post("/:provaMestreId/:token/finalizar", asyncHandler(async (req, res) => {
   const { provaMestreId, token } = req.params;
+
+  if (ehCodigoProfessor(token)) {
+    const previa = previas.get(provaMestreId);
+    if (!previa || previa.finalizada) return res.status(404).json({ erro: "A prova de teste expirou (o servidor reiniciou). Recarregue a página." });
+    const pm = await prisma.provaMestre.findUnique({ where: { id: provaMestreId } });
+    const valor = pm?.valor ?? 10;
+    previa.finalizada = true;
+    const acertos = previa.questoes.filter((q) => q.correta === true).length;
+    const total = previa.questoes.length;
+    return res.json({
+      modoProfessor: true,
+      tentativa: previa.tentativa,
+      acertos,
+      total,
+      percentual: total ? Math.round((acertos / total) * 100) : 0,
+      valor,
+      notaPontos: total ? +((acertos / total) * valor).toFixed(2) : 0,
+      prazoFinal: pm?.prazoFinal ?? null,
+      podeTentarDeNovo: true,
+      detalhe: previa.questoes.map((q) => ({
+        tema: `${q.questao.disciplina} — ${q.questao.assunto}`,
+        enunciado: q.enunciadoFinal,
+        formatoResposta: q.questao.formatoResposta,
+        alternativas: (q.alternativasFinal as any[]).map((a) => ({ letra: a.letra, campos: a.campos })),
+        respostaAlunoLetra: q.respostaAlunoLetra,
+        respostaCorretaLetra: q.respostaCorretaLetra,
+        correta: q.correta,
+      })),
+    });
+  }
 
   const provaMestre = await prisma.provaMestre.findUnique({ where: { id: provaMestreId } });
   if (!provaMestre) return res.status(404).json({ erro: "TDE não encontrado." });
