@@ -151,6 +151,8 @@ function renderCodigo() {
 async function carregarEstado() {
   try {
     const dados = await api(`/prova/${provaMestreId}/${encodeURIComponent(token)}`);
+    // modo professor: tira o código mestre da barra de endereço (não fica no histórico nem aparece se projetar a tela)
+    if (dados.modoProfessor) history.replaceState(null, "", `?prova=${provaMestreId}`);
     if (dados.estado === "em_andamento") {
       state.prova = dados;
       state.respostas = {};
@@ -218,6 +220,7 @@ function renderInstrucoes() {
     <div style="text-align:center; display:flex; flex-direction:column; gap:18px; align-items:center; padding-top:10px;">
       <div class="seal">✓ TDE - LA SALLE · EQUIVALÊNCIA VERIFICADA</div>
       <h1>Olá, ${p.alunoNome}! 👋</h1>
+      ${p.modoProfessor ? `<div class="pill amber" style="font-size:12px; padding:6px 12px;">MODO PROFESSOR — prova de teste: nada é salvo e não aparece nos resultados</div>` : ""}
       <p class="muted" style="font-size:14px; line-height:1.7;">${frase} Boa sorte! 🍀</p>
       <div class="card" style="width:100%; text-align:left;">
         <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
@@ -225,7 +228,7 @@ function renderInstrucoes() {
         <div class="muted" style="font-size:12.5px; margin-bottom:10px;">Tentativa ${p.tentativa} de no máximo 2</div>
         <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Este TDE tem</span><span>${p.questoes.length} questões</span></div>
         <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">e vale</span><span style="color:var(--teal); font-weight:600;">${formatarBR(p.valor)} pontos</span></div>
-        <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Matrícula</span><span class="mono" style="color:var(--teal);">${token}</span></div>
+        <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Matrícula</span><span class="mono" style="color:var(--teal);">${p.modoProfessor ? "modo professor" : token}</span></div>
         ${p.prazoFinal ? `<div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Prazo final</span><span>${new Date(p.prazoFinal).toLocaleString("pt-BR")}</span></div>` : ""}
       </div>
       <p class="muted" style="font-size:12px; line-height:1.6;">
@@ -500,7 +503,8 @@ function renderResultado(r) {
   document.getElementById("btn-baixar-pdf").addEventListener("click", () => gerarPDF(r));
 
   // gera automaticamente, sem o aluno precisar pedir — serve de comprovante caso precise contestar algo
-  try { gerarPDF(r); } catch (e) { console.error("Falha ao gerar PDF automático:", e); }
+  // (no modo professor não baixa sozinho; o botão continua lá se quiser)
+  if (!r.modoProfessor) try { gerarPDF(r); } catch (e) { console.error("Falha ao gerar PDF automático:", e); }
 }
 
 // monta um PDF com o comprovante completo da tentativa: questões, o que o aluno marcou,
@@ -527,7 +531,7 @@ function gerarPDF(r) {
   escreverParagrafo("TDE - La Salle", 15, true);
   escreverParagrafo(`${p.tituloProva} — Tentativa ${r.tentativa}`, 11, true);
   y += 1;
-  escreverParagrafo(`Aluno: ${p.alunoNome}     Matrícula: ${token}`, 10, false);
+  escreverParagrafo(`Aluno: ${p.alunoNome}     Matrícula: ${p.modoProfessor ? "modo professor (teste)" : token}`, 10, false);
   escreverParagrafo(`Nota: ${formatarBR(+r.notaPontos.toFixed(2))} de ${formatarBR(r.valor)}  (${r.percentual}% de acerto — ${r.acertos} de ${r.total} questões)`, 10, false);
   escreverParagrafo(`Comprovante gerado em: ${new Date().toLocaleString("pt-BR")}`, 9, false);
   y += 4;
