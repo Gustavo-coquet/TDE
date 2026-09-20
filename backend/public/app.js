@@ -148,7 +148,7 @@ function coresDosBlocos(blocos) {
 }
 
 // moldura do bloco: usada no Novo TDE (clicável, marca tudo) e no Banco (só visual)
-function molduraBloco(b, ativo, dentro, clicavel, cor) {
+function molduraBloco(b, ativo, dentro, clicavel, cor, comApagar = false) {
   // A cor identifica o BLOCO; o verde-água do checkbox continua significando "selecionado".
   const c = (cor || PALETA_BLOCO[0]).rgb;
   return `
@@ -167,6 +167,7 @@ function molduraBloco(b, ativo, dentro, clicavel, cor) {
             ${b.questoes.length} questões — mesmos valores sorteados, entram e saem juntas
           </div>
         </div>
+        ${comApagar ? `<button class="btn danger" style="font-size:10.5px; padding:3px 8px; flex-shrink:0;" data-apagar-bloco="${attr(b.grupo)}" data-qtd="${b.questoes.length}">Apagar bloco</button>` : ""}
       </div>
       ${dentro}
     </div>`;
@@ -785,7 +786,7 @@ async function renderBanco(mostrarForm) {
             <div class="mono muted" style="font-size:11.5px; margin-top:8px; line-height:1.6;">${formatarEnunciado(q.preview.enunciado)}</div>
           </div>`;
           if (!b.grupo) return cartao(b.questoes[0], false);
-          return molduraBloco(b, false, b.questoes.map((q) => cartao(q, true)).join(""), false, cores.get(b.grupo));
+          return molduraBloco(b, false, b.questoes.map((q) => cartao(q, true)).join(""), false, cores.get(b.grupo), true);
           }).join("");
         })()}
         ${filtradas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px;">${corners()}Nenhuma questão encontrada com esse filtro.</div>` : ""}
@@ -810,6 +811,24 @@ async function renderBanco(mostrarForm) {
     renderBanco(!mostrarForm);
   });
   if (mostrarForm) renderFormNovaQuestao(document.getElementById("form-questao"));
+
+  content.querySelectorAll("[data-apagar-bloco]").forEach((el) => {
+    el.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const grupo = el.dataset.apagarBloco;
+      if (!confirm(`Apagar o bloco "${grupo}" inteiro (${el.dataset.qtd} questões)?\n\nIsso não pode ser desfeito.`)) return;
+      el.disabled = true;
+      el.textContent = "Apagando…";
+      try {
+        await api(`/questoes/bloco/${encodeURIComponent(grupo)}`, { method: "DELETE" });
+        renderBanco(false);
+      } catch (e) {
+        alert("Erro ao apagar o bloco: " + e.message);
+        el.disabled = false;
+        el.textContent = "Apagar bloco";
+      }
+    });
+  });
 
   content.querySelectorAll("[data-questao]").forEach((el) => {
     el.addEventListener("click", () => {
