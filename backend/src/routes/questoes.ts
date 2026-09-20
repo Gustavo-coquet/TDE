@@ -137,6 +137,31 @@ questoesRouter.put("/:id", asyncHandler(async (req, res) => {
   res.json({ ...questao, irmasAtualizadas });
 }));
 
+// DELETE /api/questoes/bloco/:grupo -> apaga TODAS as questões de um bloco encadeado de uma vez.
+// Tudo ou nada: se alguma questão do bloco estiver em algum TDE, não apaga nenhuma e diz em quais.
+questoesRouter.delete("/bloco/:grupo", asyncHandler(async (req, res) => {
+  const grupo = req.params.grupo;
+  const total = await prisma.questao.count({ where: { grupoVariaveis: grupo } });
+  if (total === 0) return res.status(404).json({ erro: `Nenhuma questão encontrada no bloco "${grupo}".` });
+
+  const usos = await prisma.provaMestreQuestao.findMany({
+    where: { questao: { grupoVariaveis: grupo } },
+    include: { provaMestre: { select: { titulo: true } } },
+  });
+  const emProvas = await prisma.provaIndividualQuestao.count({ where: { questao: { grupoVariaveis: grupo } } });
+  if (usos.length > 0 || emProvas > 0) {
+    const titulos = Array.from(new Set(usos.map((u: any) => u.provaMestre.titulo)));
+    return res.status(400).json({
+      erro: titulos.length
+        ? `Não apaguei nada: questões deste bloco estão em uso no(s) TDE(s): ${titulos.join(", ")}. Apague ou edite esse(s) TDE(s) antes.`
+        : "Não apaguei nada: questões deste bloco já foram usadas em provas de alunos.",
+    });
+  }
+
+  const r = await prisma.questao.deleteMany({ where: { grupoVariaveis: grupo } });
+  res.json({ ok: true, apagadas: r.count });
+}));
+
 // DELETE /api/questoes/:id
 questoesRouter.delete("/:id", asyncHandler(async (req, res) => {
   const { id } = req.params;
