@@ -151,6 +151,8 @@ function coresDosBlocos(blocos) {
 function molduraBloco(b, ativo, dentro, clicavel, cor, comApagar = false) {
   // A cor identifica o BLOCO; o verde-água do checkbox continua significando "selecionado".
   const c = (cor || PALETA_BLOCO[0]).rgb;
+  // miniatura da figura do bloco, pra reconhecer de relance qual viga/peça é
+  const fig = b.questoes.map((q) => q.imagem).find(Boolean);
   return `
     <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid rgba(${c},${ativo ? ".55" : ".35"});
          border-left:4px solid rgba(${c},${ativo ? "1" : ".6"});
@@ -167,6 +169,7 @@ function molduraBloco(b, ativo, dentro, clicavel, cor, comApagar = false) {
             ${b.questoes.length} questões — mesmos valores sorteados, entram e saem juntas
           </div>
         </div>
+        ${fig ? `<img src="${fig}" alt="figura do bloco" style="flex-shrink:0; max-height:110px; max-width:280px; width:auto; height:auto; background:#fff; border:1px solid rgba(${c},.5);" />` : ""}
         ${comApagar ? `<button class="btn danger" style="font-size:10.5px; padding:3px 8px; flex-shrink:0;" data-apagar-bloco="${attr(b.grupo)}" data-qtd="${b.questoes.length}">Apagar bloco</button>` : ""}
       </div>
       ${dentro}
@@ -202,6 +205,7 @@ function itemQuestaoMontar(q, dentroDeBloco, cor) {
                 </div>
                 <div class="mono muted" style="font-size:11px; margin-top:${dentroDeBloco ? "0" : "6px"}; line-height:1.5; max-height:54px; overflow:hidden;">${formatarEnunciado(q.preview && q.preview.enunciado ? q.preview.enunciado : q.enunciado)}</div>
               </div>
+              ${!dentroDeBloco && q.imagem ? `<img src="${q.imagem}" alt="figura" style="flex-shrink:0; max-height:70px; max-width:150px; width:auto; height:auto; background:#fff; border:1px solid var(--line);" />` : ""}
             </div>`;
 }
 
