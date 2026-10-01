@@ -22,6 +22,59 @@ turmasRouter.get("/", asyncHandler(async (_req, res) => {
   );
 }));
 
+// GET /api/turmas/:id/exportar-resultados -> matriz nome x TDE com a nota de cada aluno.
+// Para cada aluno: nota = notaManual se houver, senao a MAIOR nota entre tentativas finalizadas.
+turmasRouter.get("/:id/exportar-resultados", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const turma = await prisma.turma.findUnique({ where: { id } });
+  if (!turma) return res.status(404).json({ erro: "Turma nao encontrada." });
+
+  const [alunos, provas] = await Promise.all([
+    prisma.aluno.findMany({ where: { turmaId: id }, orderBy: { nome: "asc" } }),
+    prisma.provaMestre.findMany({
+      where: { turmaId: id, status: "publicada" },
+      orderBy: { criadoEm: "asc" },
+      include: {
+        provasIndividuais: {
+          include: { questoes: { select: { respostaAlunoLetra: true } } },
+        },
+      },
+    }),
+  ]);
+
+  // mapa (provaMestreId, alunoId) -> nota final (ou null)
+  const nota = new Map<string, number | null>();
+  for (const prova of provas) {
+    const porAluno = new Map<string, typeof prova.provasIndividuais>();
+    for (const pi of prova.provasIndividuais) {
+      if (!porAluno.has(pi.alunoId)) porAluno.set(pi.alunoId, []);
+      porAluno.get(pi.alunoId)!.push(pi);
+    }
+    for (const [alunoId, tentativas] of porAluno) {
+      const comManual = tentativas.find((t) => t.notaManual !== null && t.notaManual !== undefined);
+      let melhor: number | null = null;
+      for (const t of tentativas) {
+        if (t.status !== "finalizada" || !t.total) continue;
+        const n = (t.acertos! / t.total!) * prova.valor;
+        if (melhor === null || n > melhor) melhor = n;
+      }
+      const final = comManual ? comManual.notaManual! : (melhor !== null ? +melhor.toFixed(2) : null);
+      nota.set(prova.id + ":" + alunoId, final);
+    }
+  }
+
+  res.json({
+    turmaNome: turma.nome,
+    tdes: provas.map((p) => ({ id: p.id, titulo: p.titulo, valor: p.valor })),
+    alunos: alunos.map((a) => ({
+      matricula: a.matricula,
+      nome: a.nome,
+      notas: provas.map((p) => (nota.has(p.id + ":" + a.id) ? nota.get(p.id + ":" + a.id) : null)),
+    })),
+  });
+}));
+
 // POST /api/turmas  { nome }
 turmasRouter.post("/", asyncHandler(async (req, res) => {
   const { nome } = req.body;

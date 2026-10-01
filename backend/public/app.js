@@ -400,13 +400,17 @@ async function renderTurmas() {
 
     <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:14px;">
       ${turmas.map((t) => `
-        <div class="card" style="cursor:pointer;" data-turma="${t.id}">
+        <div class="card" style="cursor:pointer; position:relative;" data-turma="${t.id}">
           ${corners()}
-          <div style="font-weight:600; font-size:15px; margin-bottom:10px;">${t.nome}</div>
-          <div class="row" style="font-size:12px; color:var(--ink-faint);">
+          <div style="font-weight:600; font-size:15px; margin-bottom:10px; padding-right:4px;">${t.nome}</div>
+          <div class="row" style="font-size:12px; color:var(--ink-faint); margin-bottom:10px;">
             <span>${t.totalAlunos} alunos</span>
             <span>${t.totalTdes} TDEs</span>
           </div>
+          <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}"
+                  style="font-size:11px; padding:4px 10px; width:100%; justify-content:center;">
+            Exportar resultados
+          </button>
         </div>
       `).join("")}
       ${turmas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px; grid-column:1/-1;">${corners()}Nenhuma turma cadastrada ainda. Crie a primeira acima.</div>` : ""}
@@ -426,7 +430,45 @@ async function renderTurmas() {
   });
 
   content.querySelectorAll("[data-turma]").forEach((el) => {
-    el.addEventListener("click", () => setView("turmaDetalhe", { turmaAtualId: el.dataset.turma }));
+    el.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-exportar-turma]")) return; // o clique no botao nao abre a turma
+      setView("turmaDetalhe", { turmaAtualId: el.dataset.turma });
+    });
+  });
+
+  content.querySelectorAll("[data-exportar-turma]").forEach((el) => {
+    el.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const btn = ev.currentTarget;
+      const nomeTurma = btn.dataset.nome;
+      btn.disabled = true;
+      const textoOriginal = btn.textContent;
+      btn.textContent = "Gerando...";
+      try {
+        const dados = await api(`/turmas/${btn.dataset.exportarTurma}/exportar-resultados`);
+        if (dados.alunos.length === 0) throw new Error("Esta turma ainda nao tem alunos.");
+        // Monta a planilha: Matricula, Nome, uma coluna por TDE (titulo + "(vale X pts)").
+        const cabecalho = ["Matricula", "Nome", ...dados.tdes.map((t) => `${t.titulo} (vale ${formatarBR(t.valor)})`)];
+        const linhas = dados.alunos.map((a) => {
+          const l = { "Matricula": a.matricula, "Nome": a.nome };
+          dados.tdes.forEach((t, i) => {
+            l[cabecalho[i + 2]] = a.notas[i] === null || a.notas[i] === undefined ? "" : formatarBR(+Number(a.notas[i]).toFixed(2));
+          });
+          return l;
+        });
+        const ws = XLSX.utils.json_to_sheet(linhas, { header: cabecalho });
+        ws["!cols"] = [{ wch: 14 }, { wch: 32 }, ...dados.tdes.map(() => ({ wch: 22 }))];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Notas");
+        const nomeArquivo = `Resultados - ${nomeTurma}`.replace(/[\\/:*?"<>|]/g, "").trim() + ".xlsx";
+        XLSX.writeFile(wb, nomeArquivo);
+      } catch (e) {
+        alert("Erro ao exportar: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
+    });
   });
 }
 
