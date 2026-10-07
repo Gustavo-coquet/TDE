@@ -28,6 +28,7 @@ provasRouter.get("/", asyncHandler(async (req, res) => {
       prazoFinal: p.prazoFinal,
       status: p.status,
       embaralharQuestoes: p.embaralharQuestoes,
+      grupoAvaliacao: p.grupoAvaliacao,
       criadoEm: p.criadoEm,
       totalQuestoes: p.questoes.length,
       totalAlunos: new Set(p.provasIndividuais.map((pi) => pi.alunoId)).size,
@@ -412,6 +413,24 @@ provasRouter.post("/:id/zerar-tentativas", asyncHandler(async (req, res) => {
   ]);
 
   res.json({ ok: true, tentativasApagadas: existentes });
+}));
+
+// PUT /api/provas-mestre/:id/grupo-avaliacao   body: { grupoAvaliacao: "G1" | "G2" | null }
+// Marca o TDE como pertencente ao calculo da G1, da G2, ou de nenhum (null).
+// Vale a qualquer momento, inclusive depois de publicado.
+provasRouter.put("/:id/grupo-avaliacao", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { grupoAvaliacao } = req.body as { grupoAvaliacao?: string | null };
+  if (grupoAvaliacao !== null && grupoAvaliacao !== "G1" && grupoAvaliacao !== "G2" && grupoAvaliacao !== undefined) {
+    return res.status(400).json({ erro: "grupoAvaliacao precisa ser \"G1\", \"G2\" ou null." });
+  }
+  const provaMestre = await prisma.provaMestre.findUnique({ where: { id } });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE nao encontrado." });
+  const atualizado = await prisma.provaMestre.update({
+    where: { id },
+    data: { grupoAvaliacao: grupoAvaliacao === undefined ? null : grupoAvaliacao },
+  });
+  res.json({ id: atualizado.id, grupoAvaliacao: atualizado.grupoAvaliacao });
 }));
 
 // PUT /api/provas-mestre/:id/prazo   body: { prazoFinal: string | null }

@@ -447,17 +447,38 @@ async function renderTurmas() {
       try {
         const dados = await api(`/turmas/${btn.dataset.exportarTurma}/exportar-resultados`);
         if (dados.alunos.length === 0) throw new Error("Esta turma ainda nao tem alunos.");
-        // Monta a planilha: Matricula, Nome, uma coluna por TDE (titulo + "(vale X pts)").
-        const cabecalho = ["Matricula", "Nome", ...dados.tdes.map((t) => `${t.titulo} (vale ${formatarBR(t.valor)})`)];
+        // Monta a planilha: Matricula, Nome, bloco de colunas G1 (TDEs + Total G1),
+        // bloco de colunas G2 (TDEs + Total G2) e por fim os TDEs sem grupo.
+        // Os totais sao somados dentro de cada grupo e arredondados PARA CIMA (Math.ceil).
+        const idxG1 = dados.tdes.map((t, i) => t.grupoAvaliacao === "G1" ? i : -1).filter((i) => i >= 0);
+        const idxG2 = dados.tdes.map((t, i) => t.grupoAvaliacao === "G2" ? i : -1).filter((i) => i >= 0);
+        const idxSG = dados.tdes.map((t, i) => !t.grupoAvaliacao ? i : -1).filter((i) => i >= 0);
+        const colTde = (i) => `${dados.tdes[i].titulo} (vale ${formatarBR(dados.tdes[i].valor)})`;
+        const cabecalho = ["Matricula", "Nome"];
+        for (const i of idxG1) cabecalho.push(colTde(i));
+        if (idxG1.length) cabecalho.push("NOTA total TDE (G1)");
+        for (const i of idxG2) cabecalho.push(colTde(i));
+        if (idxG2.length) cabecalho.push("NOTA total TDE (G2)");
+        for (const i of idxSG) cabecalho.push(colTde(i));
         const linhas = dados.alunos.map((a) => {
           const l = { "Matricula": a.matricula, "Nome": a.nome };
-          dados.tdes.forEach((t, i) => {
-            l[cabecalho[i + 2]] = a.notas[i] === null || a.notas[i] === undefined ? "" : formatarBR(+Number(a.notas[i]).toFixed(2));
-          });
+          const soma = (idxs) => idxs.reduce((acc, i) => acc + (a.notas[i] === null || a.notas[i] === undefined ? 0 : Number(a.notas[i])), 0);
+          const cel = (i) => a.notas[i] === null || a.notas[i] === undefined ? "" : formatarBR(+Number(a.notas[i]).toFixed(2));
+          for (const i of idxG1) l[colTde(i)] = cel(i);
+          if (idxG1.length) l["NOTA total TDE (G1)"] = Math.ceil(soma(idxG1));
+          for (const i of idxG2) l[colTde(i)] = cel(i);
+          if (idxG2.length) l["NOTA total TDE (G2)"] = Math.ceil(soma(idxG2));
+          for (const i of idxSG) l[colTde(i)] = cel(i);
           return l;
         });
         const ws = XLSX.utils.json_to_sheet(linhas, { header: cabecalho });
-        ws["!cols"] = [{ wch: 14 }, { wch: 32 }, ...dados.tdes.map(() => ({ wch: 22 }))];
+        const larguras = [{ wch: 14 }, { wch: 32 }];
+        for (const _ of idxG1) larguras.push({ wch: 22 });
+        if (idxG1.length) larguras.push({ wch: 20 });
+        for (const _ of idxG2) larguras.push({ wch: 22 });
+        if (idxG2.length) larguras.push({ wch: 20 });
+        for (const _ of idxSG) larguras.push({ wch: 22 });
+        ws["!cols"] = larguras;
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Notas");
         const nomeArquivo = `Resultados - ${nomeTurma}`.replace(/[\\/:*?"<>|]/g, "").trim() + ".xlsx";
@@ -525,8 +546,13 @@ async function renderTurmaDetalhe() {
               <span class="pill ${p.status==='publicada'?'teal':''}">${p.status}</span>
             </div>
             <div class="row" style="margin-top:6px;">
-              <span class="muted" style="font-size:11.5px;">${p.totalQuestoes} questões · vale ${p.valor} pts · ${p.totalAlunos} alunos${p.prazoFinal ? ` · prazo até ${new Date(p.prazoFinal).toLocaleDateString("pt-BR")}` : ""}</span>
+              <span class="muted" style="font-size:11.5px;">${p.totalQuestoes} questões · vale ${p.valor} pts · ${p.totalAlunos} alunos${p.grupoAvaliacao ? ` · <span style="color:var(--teal);">conta na ${p.grupoAvaliacao}</span>` : ""}${p.prazoFinal ? ` · prazo até ${new Date(p.prazoFinal).toLocaleDateString("pt-BR")}` : ""}</span>
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <select data-grupo-avaliacao="${p.id}" style="background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:11px;" title="Em qual avaliacao este TDE conta?">
+                  <option value="" ${!p.grupoAvaliacao ? "selected" : ""}>— sem grupo —</option>
+                  <option value="G1" ${p.grupoAvaliacao === "G1" ? "selected" : ""}>G1</option>
+                  <option value="G2" ${p.grupoAvaliacao === "G2" ? "selected" : ""}>G2</option>
+                </select>
                 <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-valor-tde="${p.id}" data-valor-atual="${p.valor}">Editar pontos</button>
                 <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-prazo-tde="${p.id}" data-prazo-atual="${p.prazoFinal || ""}">Editar prazo</button>
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-add-alunos-tde="${p.id}">+ Alunos novos</button>` : ""}
@@ -618,6 +644,23 @@ async function renderTurmaDetalhe() {
 
   content.querySelectorAll("[data-ver-resultado-tde]").forEach((el) => {
     el.addEventListener("click", () => setView("resultados", { provaAtualId: el.dataset.verResultadoTde }));
+  });
+
+  content.querySelectorAll("[data-grupo-avaliacao]").forEach((el) => {
+    el.addEventListener("change", async () => {
+      const prev = el.dataset.anterior || "";
+      el.dataset.anterior = el.value;
+      try {
+        await api(`/provas-mestre/${el.dataset.grupoAvaliacao}/grupo-avaliacao`, {
+          method: "PUT",
+          body: JSON.stringify({ grupoAvaliacao: el.value || null }),
+        });
+        renderTurmaDetalhe();
+      } catch (e) {
+        alert("Erro ao salvar: " + e.message);
+        el.value = prev;
+      }
+    });
   });
 
   content.querySelectorAll("[data-editar-valor-tde]").forEach((el) => {

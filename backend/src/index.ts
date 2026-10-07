@@ -59,6 +59,17 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 // vazio). Não populamos mais alunos automaticamente — a turma real é cadastrada
 // pelo professor na tela "Alunos". Isso evita depender de um terminal manual,
 // necessário porque o Shell do Render só existe em planos pagos.
+// Migracao leve: para colunas novas adicionadas ao schema. Idempotente (IF NOT EXISTS)
+// -- roda uma vez por startup, serve de rede de seguranca mesmo se o prisma db push
+// nao for executado no deploy.
+async function atualizarEsquema() {
+  try {
+    await prisma.$executeRawUnsafe('ALTER TABLE "ProvaMestre" ADD COLUMN IF NOT EXISTS "grupoAvaliacao" TEXT');
+  } catch (e) {
+    console.error("Falha ao atualizar o esquema (talvez a tabela ainda nao exista):", e);
+  }
+}
+
 async function garantirDadosIniciais() {
   const totalQuestoes = await prisma.questao.count();
   if (totalQuestoes === 0) {
@@ -80,7 +91,8 @@ async function garantirDadosIniciais() {
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3333;
 
-garantirDadosIniciais()
+atualizarEsquema()
+  .then(() => garantirDadosIniciais())
   .catch((e) => {
     // Não derruba o servidor por causa disso — só loga. Se o banco ainda não
     // tiver as tabelas (schema pendente), as rotas vão responder com um erro
