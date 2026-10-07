@@ -465,9 +465,9 @@ async function renderTurmas() {
           const soma = (idxs) => idxs.reduce((acc, i) => acc + (a.notas[i] === null || a.notas[i] === undefined ? 0 : Number(a.notas[i])), 0);
           const cel = (i) => a.notas[i] === null || a.notas[i] === undefined ? "" : formatarBR(+Number(a.notas[i]).toFixed(2));
           for (const i of idxG1) l[colTde(i)] = cel(i);
-          if (idxG1.length) l["NOTA total TDE (G1)"] = Math.ceil(soma(idxG1));
+          if (idxG1.length) l["NOTA total TDE (G1)"] = formatarBR(Math.ceil(soma(idxG1) * 10) / 10);
           for (const i of idxG2) l[colTde(i)] = cel(i);
-          if (idxG2.length) l["NOTA total TDE (G2)"] = Math.ceil(soma(idxG2));
+          if (idxG2.length) l["NOTA total TDE (G2)"] = formatarBR(Math.ceil(soma(idxG2) * 10) / 10);
           for (const i of idxSG) l[colTde(i)] = cel(i);
           return l;
         });
