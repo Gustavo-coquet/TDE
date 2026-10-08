@@ -447,38 +447,102 @@ async function renderTurmas() {
       try {
         const dados = await api(`/turmas/${btn.dataset.exportarTurma}/exportar-resultados`);
         if (dados.alunos.length === 0) throw new Error("Esta turma ainda nao tem alunos.");
-        // Monta a planilha: Matricula, Nome, bloco de colunas G1 (TDEs + Total G1),
-        // bloco de colunas G2 (TDEs + Total G2) e por fim os TDEs sem grupo.
-        // Os totais sao somados dentro de cada grupo e arredondados PARA CIMA (Math.ceil).
+        // Monta a planilha. Estrutura: Matricula, Nome, (bloco G1), (bloco G2), (sem grupo).
+        // Cada bloco de grupo G leva: um TDE por coluna, depois "Total TDE (G)",
+        // depois "Nota AVn" (vazia, pro professor preencher) e depois a coluna final
+        // "Gn" com formula =SUM(Total+AV) — somando a nota dos TDEs do grupo com a prova.
+        // Totais sao arredondados PARA CIMA com 1 casa decimal (Math.ceil(x*10)/10).
         const idxG1 = dados.tdes.map((t, i) => t.grupoAvaliacao === "G1" ? i : -1).filter((i) => i >= 0);
         const idxG2 = dados.tdes.map((t, i) => t.grupoAvaliacao === "G2" ? i : -1).filter((i) => i >= 0);
         const idxSG = dados.tdes.map((t, i) => !t.grupoAvaliacao ? i : -1).filter((i) => i >= 0);
         const colTde = (i) => `${dados.tdes[i].titulo} (vale ${formatarBR(dados.tdes[i].valor)})`;
+
+        // monta o cabecalho guardando a POSICAO (coluna 0-indexed) das colunas especiais
+        // de cada grupo pra depois escrever formulas e larguras certinho.
         const cabecalho = ["Matricula", "Nome"];
-        for (const i of idxG1) cabecalho.push(colTde(i));
-        if (idxG1.length) cabecalho.push("NOTA total TDE (G1)");
-        for (const i of idxG2) cabecalho.push(colTde(i));
-        if (idxG2.length) cabecalho.push("NOTA total TDE (G2)");
-        for (const i of idxSG) cabecalho.push(colTde(i));
-        const linhas = dados.alunos.map((a) => {
-          const l = { "Matricula": a.matricula, "Nome": a.nome };
-          const soma = (idxs) => idxs.reduce((acc, i) => acc + (a.notas[i] === null || a.notas[i] === undefined ? 0 : Number(a.notas[i])), 0);
-          const cel = (i) => a.notas[i] === null || a.notas[i] === undefined ? "" : formatarBR(+Number(a.notas[i]).toFixed(2));
-          for (const i of idxG1) l[colTde(i)] = cel(i);
-          if (idxG1.length) l["NOTA total TDE (G1)"] = formatarBR(Math.ceil(soma(idxG1) * 10) / 10);
-          for (const i of idxG2) l[colTde(i)] = cel(i);
-          if (idxG2.length) l["NOTA total TDE (G2)"] = formatarBR(Math.ceil(soma(idxG2) * 10) / 10);
-          for (const i of idxSG) l[colTde(i)] = cel(i);
-          return l;
+        const idxColTde = {};  // indice do TDE original -> coluna no xlsx
+        const pos = { totalG1: -1, avG1: -1, g1: -1, totalG2: -1, avG2: -1, g2: -1 };
+        const empurra = (titulo) => { cabecalho.push(titulo); return cabecalho.length - 1; };
+        for (const i of idxG1) idxColTde[i] = empurra(colTde(i));
+        if (idxG1.length) { pos.totalG1 = empurra("Total TDE (G1)"); pos.avG1 = empurra("Nota AV1"); pos.g1 = empurra("G1"); }
+        for (const i of idxG2) idxColTde[i] = empurra(colTde(i));
+        if (idxG2.length) { pos.totalG2 = empurra("Total TDE (G2)"); pos.avG2 = empurra("Nota AV2"); pos.g2 = empurra("G2"); }
+        for (const i of idxSG) idxColTde[i] = empurra(colTde(i));
+
+        // monta a matriz. Guardamos VALORES NUMERICOS (nao texto "1,9") para que as formulas
+        // =SUM(Total+AV) funcionem — se virasse string com virgula o Excel devolve #VALUE!.
+        // A exibicao com virgula vem do formato de celula (z: "0.##") combinado com a locale
+        // do Excel/LibreOffice do professor, que no Brasil mostra ponto como virgula.
+        const soma = (a, idxs) => idxs.reduce((acc, i) => acc + (a.notas[i] === null || a.notas[i] === undefined ? 0 : Number(a.notas[i])), 0);
+        const num = (v) => (v === null || v === undefined ? null : +Number(v).toFixed(2));
+        const matriz = [cabecalho];
+        const metaNumericas = [];  // {r, c, valor, fmt} pra atribuir dps como celula numerica
+        dados.alunos.forEach((a, k) => {
+          const r = k + 1;
+          const linha = new Array(cabecalho.length).fill("");
+          linha[0] = a.matricula;
+          linha[1] = a.nome;
+          const empurraNum = (c, v, fmt) => { if (v !== null && v !== undefined) metaNumericas.push({ r, c, v, fmt }); };
+          for (const i of idxG1) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
+          if (idxG1.length) empurraNum(pos.totalG1, Math.ceil(soma(a, idxG1) * 10) / 10, "0.##");
+          for (const i of idxG2) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
+          if (idxG2.length) empurraNum(pos.totalG2, Math.ceil(soma(a, idxG2) * 10) / 10, "0.##");
+          for (const i of idxSG) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
+          matriz.push(linha);
         });
-        const ws = XLSX.utils.json_to_sheet(linhas, { header: cabecalho });
-        const larguras = [{ wch: 14 }, { wch: 32 }];
-        for (const _ of idxG1) larguras.push({ wch: 22 });
-        if (idxG1.length) larguras.push({ wch: 20 });
-        for (const _ of idxG2) larguras.push({ wch: 22 });
-        if (idxG2.length) larguras.push({ wch: 20 });
-        for (const _ of idxSG) larguras.push({ wch: 22 });
-        ws["!cols"] = larguras;
+
+        const ws = XLSX.utils.aoa_to_sheet(matriz);
+
+        // substitui os valores numericos (criados como string "") por celulas numericas
+        for (const m of metaNumericas) {
+          ws[XLSX.utils.encode_cell({ r: m.r, c: m.c })] = { t: "n", v: m.v, z: m.fmt };
+        }
+
+        // formula =SUM(Total+AV) em cada linha de aluno, nas colunas "Gn"
+        const colL = (c) => XLSX.utils.encode_col(c);
+        for (let r = 1; r < matriz.length; r++) {
+          const linhaExcel = r + 1;
+          if (pos.g1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g1 })] = { t: "n", f: `SUM(${colL(pos.totalG1)}${linhaExcel}+${colL(pos.avG1)}${linhaExcel})`, z: "0.##" };
+          if (pos.g2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g2 })] = { t: "n", f: `SUM(${colL(pos.totalG2)}${linhaExcel}+${colL(pos.avG2)}${linhaExcel})`, z: "0.##" };
+        }
+
+        // larguras das colunas (mesma proporcao do modelo do professor)
+        const larg = new Array(cabecalho.length).fill({ wch: 10 });
+        larg[0] = { wch: 14.83 };   // Matricula
+        larg[1] = { wch: 32.83 };   // Nome
+        for (const i of idxG1) larg[idxColTde[i]] = { wch: 10 };
+        if (pos.totalG1 >= 0) { larg[pos.totalG1] = { wch: 13 }; larg[pos.avG1] = { wch: 13 }; larg[pos.g1] = { wch: 10 }; }
+        for (const i of idxG2) larg[idxColTde[i]] = { wch: 10 };
+        if (pos.totalG2 >= 0) { larg[pos.totalG2] = { wch: 13 }; larg[pos.avG2] = { wch: 13 }; larg[pos.g2] = { wch: 10 }; }
+        for (const i of idxSG) larg[idxColTde[i]] = { wch: 10 };
+        ws["!cols"] = larg;
+        ws["!rows"] = [{ hpt: 32 }];  // cabecalho mais alto, pra caber duas linhas com wrap
+
+        // ESTILOS: cabecalho com fundo pessego, celulas com borda. Precisa de xlsx-js-style
+        // (drop-in do SheetJS que exporta estilos; carregado em index.html).
+        const bordaFina = { style: "thin", color: { rgb: "808080" } };
+        const borda = { top: bordaFina, bottom: bordaFina, left: bordaFina, right: bordaFina };
+        const estiloHeader = {
+          fill: { patternType: "solid", fgColor: { rgb: "FCD5B5" } },
+          alignment: { horizontal: "center", vertical: "center", wrapText: true },
+          font: { name: "Calibri", sz: 12 },
+          border: borda,
+        };
+        const estiloEsq = { alignment: { horizontal: "left", vertical: "center" }, font: { name: "Calibri", sz: 12 }, border: borda };
+        const estiloCentrado = { alignment: { horizontal: "center", vertical: "center" }, font: { name: "Calibri", sz: 12 }, border: borda };
+
+        // aplica
+        for (let r = 0; r < matriz.length; r++) {
+          for (let c = 0; c < cabecalho.length; c++) {
+            const ref = XLSX.utils.encode_cell({ r, c });
+            if (!ws[ref]) ws[ref] = { t: "s", v: "" };  // garante que a celula vazia tambem leve estilo
+            if (r === 0) ws[ref].s = estiloHeader;
+            else ws[ref].s = (c <= 1) ? estiloEsq : estiloCentrado;
+          }
+        }
+        // garante que o range cobre todo o retangulo (pra o estilo das celulas vazias valer)
+        ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: matriz.length - 1, c: cabecalho.length - 1 } });
+
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Notas");
         const nomeArquivo = `Resultados - ${nomeTurma}`.replace(/[\\/:*?"<>|]/g, "").trim() + ".xlsx";
