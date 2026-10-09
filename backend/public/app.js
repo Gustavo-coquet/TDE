@@ -569,8 +569,10 @@ async function renderTurmaDetalhe() {
           <button class="btn subtle" id="btn-novo-tde" style="font-size:11px; padding:5px 10px;">+ Novo TDE</button>
         </div>
         ${provas.length === 0 ? `<div class="muted" style="font-size:13px;">Nenhum TDE criado ainda nesta turma.</div>` : ""}
+        <div id="lista-tdes-arrastavel">
         ${provas.map((p, i) => `
-          <div style="padding:10px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}">
+          <div class="tde-card" draggable="true" data-tde-id="${p.id}" style="padding:10px 10px 10px 28px; ${i>0?'border-top:1px solid var(--line-faint);':''}; position:relative; background:var(--surface);">
+            <span class="tde-grip" style="position:absolute; left:6px; top:12px; cursor:grab; color:var(--ink-faint); font-size:16px; line-height:1; user-select:none;" title="Arraste para reordenar">⋮⋮</span>
             <div class="row">
               <div style="font-weight:600; font-size:13.5px;">${p.titulo}</div>
               <span class="pill ${p.status==='publicada'?'teal':''}">${p.status}</span>
@@ -598,6 +600,7 @@ async function renderTurmaDetalhe() {
             <div id="links-tde-${p.id}"></div>
           </div>
         `).join("")}
+        </div>
       </div>
     </div>
   `;
@@ -648,6 +651,49 @@ async function renderTurmaDetalhe() {
       erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
     }
   });
+
+  (() => {
+    // ---- arrastar e soltar pra reordenar os TDEs ----
+    const lista = document.getElementById("lista-tdes-arrastavel");
+    if (!lista) return;
+    let arrastando = null;
+    const cards = Array.from(lista.querySelectorAll(".tde-card"));
+    cards.forEach((card) => {
+      card.addEventListener("dragstart", (ev) => {
+        arrastando = card;
+        card.style.opacity = "0.4";
+        try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", card.dataset.tdeId); } catch {}
+      });
+      card.addEventListener("dragend", () => {
+        card.style.opacity = "";
+        lista.querySelectorAll(".tde-card").forEach((c) => c.style.borderTop = "");
+        arrastando = null;
+      });
+      card.addEventListener("dragover", (ev) => {
+        if (!arrastando || arrastando === card) return;
+        ev.preventDefault();
+        try { ev.dataTransfer.dropEffect = "move"; } catch {}
+        // move na hora pra o usuario ver o resultado antes de soltar
+        const r = card.getBoundingClientRect();
+        const antes = ev.clientY < r.top + r.height / 2;
+        if (antes) lista.insertBefore(arrastando, card);
+        else lista.insertBefore(arrastando, card.nextSibling);
+      });
+      card.addEventListener("drop", (ev) => { ev.preventDefault(); });
+    });
+    lista.addEventListener("drop", async (ev) => {
+      ev.preventDefault();
+      const ids = Array.from(lista.querySelectorAll(".tde-card")).map((c) => c.dataset.tdeId);
+      try {
+        await api(`/provas-mestre/reordenar`, { method: "POST", body: JSON.stringify({ turmaId, ids }) });
+        // recarrega pra garantir que a ordem salva bate com o que esta na tela
+        renderTurmaDetalhe();
+      } catch (e) {
+        alert("Erro ao salvar a nova ordem: " + e.message);
+        renderTurmaDetalhe();
+      }
+    });
+  })();
 
   content.querySelectorAll("[data-nota-av]").forEach((el) => {
     el.dataset.prev = el.value;

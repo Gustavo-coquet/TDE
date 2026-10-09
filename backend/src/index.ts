@@ -65,6 +65,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 async function atualizarEsquema() {
   try {
     await prisma.$executeRawUnsafe('ALTER TABLE "ProvaMestre" ADD COLUMN IF NOT EXISTS "grupoAvaliacao" TEXT');
+    await prisma.$executeRawUnsafe('ALTER TABLE "ProvaMestre" ADD COLUMN IF NOT EXISTS "ordem" INTEGER');
     await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ADD COLUMN IF NOT EXISTS "acertosAV1" DOUBLE PRECISION');
     // Se a coluna foi criada no deploy anterior como INTEGER (quando so aceitavamos inteiros),
     // converte para DOUBLE PRECISION preservando os valores digitados. Idempotente.

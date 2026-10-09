@@ -34,7 +34,7 @@ turmasRouter.get("/:id/exportar-resultados", asyncHandler(async (req, res) => {
     prisma.aluno.findMany({ where: { turmaId: id }, orderBy: { nome: "asc" } }),
     prisma.provaMestre.findMany({
       where: { turmaId: id, status: "publicada" },
-      orderBy: { criadoEm: "asc" },
+      orderBy: [{ ordem: { sort: "asc", nulls: "last" } }, { criadoEm: "asc" }],
       include: {
         provasIndividuais: {
           include: { questoes: { select: { respostaAlunoLetra: true } } },

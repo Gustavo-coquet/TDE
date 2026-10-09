@@ -10,7 +10,7 @@ provasRouter.get("/", asyncHandler(async (req, res) => {
   const { turmaId } = req.query as { turmaId?: string };
   const provas = await prisma.provaMestre.findMany({
     where: turmaId ? { turmaId } : undefined,
-    orderBy: { criadoEm: "desc" },
+    orderBy: [{ ordem: { sort: "asc", nulls: "last" } }, { criadoEm: "desc" }],
     include: {
       questoes: true,
       provasIndividuais: true,
@@ -431,6 +431,23 @@ provasRouter.put("/:id/grupo-avaliacao", asyncHandler(async (req, res) => {
     data: { grupoAvaliacao: grupoAvaliacao === undefined ? null : grupoAvaliacao },
   });
   res.json({ id: atualizado.id, grupoAvaliacao: atualizado.grupoAvaliacao });
+}));
+
+// POST /api/provas-mestre/reordenar   body: { turmaId: string, ids: string[] }
+// Grava a posicao escolhida pelo professor arrastando os cards. Atribui ordem 1..N na
+// sequencia enviada. Qualquer TDE da turma que nao estiver na lista fica com ordem null
+// (vai pro fim). E atomico: se qualquer update falhar, nada muda.
+provasRouter.post("/reordenar", asyncHandler(async (req, res) => {
+  const { turmaId, ids } = req.body as { turmaId?: string; ids?: string[] };
+  if (!turmaId) return res.status(400).json({ erro: "turmaId e obrigatorio." });
+  if (!Array.isArray(ids)) return res.status(400).json({ erro: "ids precisa ser um array." });
+  const provas = await prisma.provaMestre.findMany({ where: { turmaId }, select: { id: true } });
+  const validos = new Set(provas.map((p) => p.id));
+  const idsOk = ids.filter((id) => validos.has(id));
+  await prisma.$transaction([
+    ...idsOk.map((id, idx) => prisma.provaMestre.update({ where: { id }, data: { ordem: idx + 1 } })),
+  ]);
+  res.json({ ok: true, atualizados: idsOk.length });
 }));
 
 // PUT /api/provas-mestre/:id/titulo   body: { titulo: string }

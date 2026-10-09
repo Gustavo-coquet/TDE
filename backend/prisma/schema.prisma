@@ -60,6 +60,7 @@ model ProvaMestre {
   prazoFinal       DateTime?                      // até quando o aluno pode responder (null = sem prazo)
   status           String   @default("rascunho") // rascunho | publicada
   grupoAvaliacao   String?                        // "G1" | "G2" | null — para somar notas dos TDEs por avaliacao
+  ordem            Int?                           // posicao escolhida pelo professor pra arrastar/ordenar os TDEs; nulo = fica no fim pela criadoEm
   embaralharQuestoes Boolean @default(true)      // true = cada aluno recebe as questões em ordem sorteada;
                                                  // false = todos recebem na ordem definida pelo professor
                                                  // (o campo "ordem" de ProvaMestreQuestao). As alternativas
