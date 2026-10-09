@@ -583,6 +583,7 @@ async function renderTurmaDetalhe() {
                   <option value="G1" ${p.grupoAvaliacao === "G1" ? "selected" : ""}>G1</option>
                   <option value="G2" ${p.grupoAvaliacao === "G2" ? "selected" : ""}>G2</option>
                 </select>
+                <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-renomear-tde="${p.id}" data-titulo-atual="${attr(p.titulo)}">Renomear</button>
                 <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-valor-tde="${p.id}" data-valor-atual="${p.valor}">Editar pontos</button>
                 <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-prazo-tde="${p.id}" data-prazo-atual="${p.prazoFinal || ""}">Editar prazo</button>
                 ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-add-alunos-tde="${p.id}">+ Alunos novos</button>` : ""}
@@ -712,6 +713,23 @@ async function renderTurmaDetalhe() {
       } catch (e) {
         alert("Erro ao salvar: " + e.message);
         el.value = prev;
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-renomear-tde]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const atual = el.dataset.tituloAtual || "";
+      const novo = prompt("Novo nome do TDE:", atual);
+      if (novo === null) return;
+      const limpo = novo.trim();
+      if (!limpo) { alert("O nome nao pode ficar vazio."); return; }
+      if (limpo === atual) return;
+      try {
+        await api(`/provas-mestre/${el.dataset.renomearTde}/titulo`, { method: "PUT", body: JSON.stringify({ titulo: limpo }) });
+        renderTurmaDetalhe();
+      } catch (e) {
+        alert("Erro ao renomear: " + e.message);
       }
     });
   });

@@ -433,6 +433,19 @@ provasRouter.put("/:id/grupo-avaliacao", asyncHandler(async (req, res) => {
   res.json({ id: atualizado.id, grupoAvaliacao: atualizado.grupoAvaliacao });
 }));
 
+// PUT /api/provas-mestre/:id/titulo   body: { titulo: string }
+// Renomeia o TDE. Vale a qualquer momento, inclusive publicado.
+provasRouter.put("/:id/titulo", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { titulo } = req.body as { titulo?: string };
+  const t = String(titulo || "").trim();
+  if (!t) return res.status(400).json({ erro: "Informe o novo nome do TDE." });
+  const provaMestre = await prisma.provaMestre.findUnique({ where: { id } });
+  if (!provaMestre) return res.status(404).json({ erro: "TDE nao encontrado." });
+  const atualizado = await prisma.provaMestre.update({ where: { id }, data: { titulo: t } });
+  res.json({ id: atualizado.id, titulo: atualizado.titulo });
+}));
+
 // PUT /api/provas-mestre/:id/prazo   body: { prazoFinal: string | null }
 // Edita só o prazo final de um TDE (mesmo já publicado, mesmo com alunos já respondendo).
 // Não mexe nas provas individuais já geradas — só muda a data limite pra novas respostas.
