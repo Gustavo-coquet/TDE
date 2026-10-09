@@ -1,5 +1,5 @@
 const state = {
-  view: "dashboard",
+  view: "turmas",
   turmaAtualId: null,
   provaAtualId: null,
   questoes: [],
@@ -321,8 +321,7 @@ async function api(path, options) {
 async function render() {
   content.innerHTML = `<div class="spinner">Carregando…</div>`;
   try {
-    if (state.view === "dashboard") await renderDashboard();
-    else if (state.view === "turmas") await renderTurmas();
+    if (state.view === "turmas") await renderTurmas();
     else if (state.view === "turmaDetalhe") await renderTurmaDetalhe();
     else if (state.view === "banco") await renderBanco();
     else if (state.view === "montar") await renderMontar();
@@ -331,54 +330,6 @@ async function render() {
   } catch (e) {
     content.innerHTML = `<div class="error-box">Erro: ${e.message}. Confira se o backend está rodando e o banco foi migrado.</div>`;
   }
-}
-
-/* ---------------- Dashboard ---------------- */
-async function renderDashboard() {
-  const [turmas, questoes, provas] = await Promise.all([
-    api("/turmas"), api("/questoes"), api("/provas-mestre"),
-  ]);
-
-  const totalAlunos = turmas.reduce((a, t) => a + t.totalAlunos, 0);
-
-  content.innerHTML = `
-    <div class="eyebrow">PAINEL DO PROFESSOR</div>
-    <h1 style="margin-bottom:20px;">Visão geral</h1>
-
-    <div class="grid-stats" style="margin-bottom:20px;">
-      <div class="card">${corners()}<div class="stat-label">Turmas</div><div class="stat-value">${turmas.length}</div></div>
-      <div class="card">${corners()}<div class="stat-label">Alunos matriculados</div><div class="stat-value">${totalAlunos}</div></div>
-      <div class="card">${corners()}<div class="stat-label">TDEs criados</div><div class="stat-value">${provas.length}</div></div>
-      <div class="card">${corners()}<div class="stat-label">Questões no banco</div><div class="stat-value">${questoes.length}</div></div>
-    </div>
-
-    <div class="card" style="margin-bottom:20px;">
-      ${corners()}
-      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px;">TDEs recentes</div>
-      ${provas.length === 0 ? `<div class="muted" style="font-size:13px;">Nenhum TDE criado ainda.</div>` : ""}
-      ${provas.slice(0, 8).map((p, i) => `
-        <div class="row" style="padding:12px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}">
-          <div>
-            <div style="font-weight:600; font-size:14px;">${p.titulo}</div>
-            <div class="muted" style="font-size:12px; margin-top:2px;">${p.turmaNome} · ${p.totalQuestoes} questões · ${p.totalAlunos} provas geradas</div>
-          </div>
-          <div style="display:flex; align-items:center; gap:12px;">
-            <span class="pill ${p.status==='publicada'?'teal':''}">${p.status}</span>
-            ${p.status==='publicada' ? `<button class="btn subtle" data-ver-resultado="${p.id}">Ver resultados</button>` : ""}
-          </div>
-        </div>
-      `).join("")}
-    </div>
-
-    <div style="display:flex; gap:10px;">
-      <button class="btn" id="btn-ir-turmas">${turmas.length === 0 ? "+ Criar minha primeira turma" : "Ir para Turmas"}</button>
-    </div>
-  `;
-
-  document.getElementById("btn-ir-turmas").addEventListener("click", () => setView("turmas"));
-  content.querySelectorAll("[data-ver-resultado]").forEach((el) => {
-    el.addEventListener("click", () => setView("resultados", { provaAtualId: el.dataset.verResultado }));
-  });
 }
 
 /* ---------------- Turmas (lista) ---------------- */
@@ -485,8 +436,10 @@ async function renderTurmas() {
           const empurraNum = (c, v, fmt) => { if (v !== null && v !== undefined) metaNumericas.push({ r, c, v, fmt }); };
           for (const i of idxG1) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
           if (idxG1.length) empurraNum(pos.totalG1, Math.ceil(soma(a, idxG1) * 10) / 10, "0.##");
+          if (idxG1.length) empurraNum(pos.avG1, a.notaAV1, "0.##");  // valor digitado pelo professor, se houver
           for (const i of idxG2) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
           if (idxG2.length) empurraNum(pos.totalG2, Math.ceil(soma(a, idxG2) * 10) / 10, "0.##");
+          if (idxG2.length) empurraNum(pos.avG2, a.notaAV2, "0.##");
           for (const i of idxSG) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
           matriz.push(linha);
         });
@@ -588,8 +541,15 @@ async function renderTurmaDetalhe() {
         <div class="divider">
           ${alunos.length === 0 ? `<div class="muted" style="font-size:13px;">Nenhum aluno matriculado ainda.</div>` : ""}
           ${alunos.map((a, i) => `
-            <div class="row" style="padding:8px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}">
-              <span style="font-size:13px;">${a.nome} <span class="mono muted" style="font-size:11px;">— matrícula ${a.matricula}</span></span>
+            <div class="row" style="padding:8px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}; align-items:center; flex-wrap:wrap; gap:8px;">
+              <span style="font-size:13px; flex:1 1 220px;">${a.nome} <span class="mono muted" style="font-size:11px;">— matrícula ${a.matricula}</span></span>
+              <div style="display:flex; align-items:center; gap:6px; font-size:11px;">
+                <label style="color:var(--ink-faint);">AV1</label>
+                <input data-nota-av="notaAV1" data-aluno="${a.id}" type="number" step="0.1" min="0" max="10" value="${a.notaAV1 ?? ""}" placeholder="—" style="width:60px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G1 (0 a 10)" />
+                <label style="color:var(--ink-faint); margin-left:6px;">AV2</label>
+                <input data-nota-av="notaAV2" data-aluno="${a.id}" type="number" step="0.1" min="0" max="10" value="${a.notaAV2 ?? ""}" placeholder="—" style="width:60px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G2 (0 a 10)" />
+                <span id="erro-av-${a.id}" class="mono" style="color:var(--red); font-size:10px;"></span>
+              </div>
               <button class="btn danger" style="padding:4px 8px; font-size:11px;" data-remover-aluno="${a.id}">Remover</button>
             </div>
           `).join("")}
@@ -680,6 +640,24 @@ async function renderTurmaDetalhe() {
     } catch (e) {
       erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
     }
+  });
+
+  content.querySelectorAll("[data-nota-av]").forEach((el) => {
+    el.dataset.prev = el.value;
+    el.addEventListener("change", async () => {
+      const campo = el.dataset.notaAv;
+      const alunoId = el.dataset.aluno;
+      const erroEl = document.getElementById(`erro-av-${alunoId}`);
+      erroEl.textContent = "";
+      try {
+        const valor = el.value.trim() === "" ? null : Number(el.value);
+        await api(`/alunos/${alunoId}/nota-av`, { method: "PUT", body: JSON.stringify({ campo, valor }) });
+        el.dataset.prev = el.value;
+      } catch (e) {
+        erroEl.textContent = e.message;
+        el.value = el.dataset.prev;
+      }
+    });
   });
 
   content.querySelectorAll("[data-remover-aluno]").forEach((el) => {

@@ -47,6 +47,29 @@ alunosRouter.post("/", asyncHandler(async (req, res) => {
   res.status(201).json({ criados, erros });
 }));
 
+// PUT /api/alunos/:id/nota-av   body: { campo: "notaAV1"|"notaAV2", valor: number|null }
+// Lanca ou apaga a nota de uma avaliacao presencial. valor=null limpa.
+alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { campo, valor } = (req.body || {}) as { campo?: string; valor?: number | string | null };
+  if (campo !== "notaAV1" && campo !== "notaAV2") {
+    return res.status(400).json({ erro: "campo precisa ser \"notaAV1\" ou \"notaAV2\"." });
+  }
+  let num: number | null = null;
+  if (valor !== null && valor !== undefined && valor !== "") {
+    num = Number(valor);
+    if (!isFinite(num) || num < 0 || num > 10) {
+      return res.status(400).json({ erro: "A nota precisa ser um numero entre 0 e 10 (ou vazio para apagar)." });
+    }
+  }
+  try {
+    const aluno = await prisma.aluno.update({ where: { id }, data: { [campo]: num } });
+    res.json({ id: aluno.id, [campo]: (aluno as any)[campo] });
+  } catch (e: any) {
+    res.status(404).json({ erro: "Aluno nao encontrado." });
+  }
+}));
+
 // DELETE /api/alunos/:id   body opcional: { senha }
 // Se o aluno já tem TDEs respondidos, exige a senha do professor pra confirmar
 // (apaga em cascata: respostas, provas individuais, e por fim o aluno).

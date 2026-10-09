@@ -65,6 +65,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 async function atualizarEsquema() {
   try {
     await prisma.$executeRawUnsafe('ALTER TABLE "ProvaMestre" ADD COLUMN IF NOT EXISTS "grupoAvaliacao" TEXT');
+    await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ADD COLUMN IF NOT EXISTS "notaAV1" DOUBLE PRECISION');
+    await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ADD COLUMN IF NOT EXISTS "notaAV2" DOUBLE PRECISION');
   } catch (e) {
     console.error("Falha ao atualizar o esquema (talvez a tabela ainda nao exista):", e);
   }

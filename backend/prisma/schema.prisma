@@ -23,6 +23,8 @@ model Aluno {
   turma             Turma             @relation(fields: [turmaId], references: [id])
   turmaId           String
   criadoEm          DateTime          @default(now())
+  notaAV1           Float?            // nota da avaliacao presencial da G1 (fica em branco ate o professor digitar)
+  notaAV2           Float?            // nota da avaliacao presencial da G2
   provasIndividuais ProvaIndividual[]
 
   @@unique([turmaId, matricula])
