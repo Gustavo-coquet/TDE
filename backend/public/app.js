@@ -654,45 +654,52 @@ async function renderTurmaDetalhe() {
 
   (() => {
     // ---- arrastar e soltar pra reordenar os TDEs ----
+    // O save roda no "dragend" (nao no "drop"), porque o drop so dispara se o usuario
+    // solta exatamente em cima de um alvo valido. Soltando em espaco em branco entre
+    // cards o drop nao fira e a nova ordem se perdia na proxima carga da pagina.
     const lista = document.getElementById("lista-tdes-arrastavel");
     if (!lista) return;
     let arrastando = null;
+    let ordemInicial = [];
+    let salvando = false;
     const cards = Array.from(lista.querySelectorAll(".tde-card"));
     cards.forEach((card) => {
       card.addEventListener("dragstart", (ev) => {
         arrastando = card;
+        ordemInicial = Array.from(lista.querySelectorAll(".tde-card")).map((c) => c.dataset.tdeId);
         card.style.opacity = "0.4";
         try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", card.dataset.tdeId); } catch {}
-      });
-      card.addEventListener("dragend", () => {
-        card.style.opacity = "";
-        lista.querySelectorAll(".tde-card").forEach((c) => c.style.borderTop = "");
-        arrastando = null;
       });
       card.addEventListener("dragover", (ev) => {
         if (!arrastando || arrastando === card) return;
         ev.preventDefault();
         try { ev.dataTransfer.dropEffect = "move"; } catch {}
-        // move na hora pra o usuario ver o resultado antes de soltar
         const r = card.getBoundingClientRect();
         const antes = ev.clientY < r.top + r.height / 2;
         if (antes) lista.insertBefore(arrastando, card);
         else lista.insertBefore(arrastando, card.nextSibling);
       });
       card.addEventListener("drop", (ev) => { ev.preventDefault(); });
+      card.addEventListener("dragend", async () => {
+        card.style.opacity = "";
+        arrastando = null;
+        if (salvando) return;
+        const ids = Array.from(lista.querySelectorAll(".tde-card")).map((c) => c.dataset.tdeId);
+        if (ids.join(",") === ordemInicial.join(",")) return; // nada mudou, nao salva
+        salvando = true;
+        try {
+          await api(`/provas-mestre/reordenar`, { method: "POST", body: JSON.stringify({ turmaId, ids }) });
+          renderTurmaDetalhe();
+        } catch (e) {
+          alert("Erro ao salvar a nova ordem: " + e.message);
+          renderTurmaDetalhe();
+        } finally {
+          salvando = false;
+        }
+      });
     });
-    lista.addEventListener("drop", async (ev) => {
-      ev.preventDefault();
-      const ids = Array.from(lista.querySelectorAll(".tde-card")).map((c) => c.dataset.tdeId);
-      try {
-        await api(`/provas-mestre/reordenar`, { method: "POST", body: JSON.stringify({ turmaId, ids }) });
-        // recarrega pra garantir que a ordem salva bate com o que esta na tela
-        renderTurmaDetalhe();
-      } catch (e) {
-        alert("Erro ao salvar a nova ordem: " + e.message);
-        renderTurmaDetalhe();
-      }
-    });
+    // tolerancia a drop no proprio contêiner (ou qualquer canto da lista)
+    lista.addEventListener("dragover", (ev) => { if (arrastando) ev.preventDefault(); });
   })();
 
   content.querySelectorAll("[data-nota-av]").forEach((el) => {
