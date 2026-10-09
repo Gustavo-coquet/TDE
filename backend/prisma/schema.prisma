@@ -23,7 +23,7 @@ model Aluno {
   turma             Turma             @relation(fields: [turmaId], references: [id])
   turmaId           String
   criadoEm          DateTime          @default(now())
-  acertosAV1        Int?              // quantas das 10 questoes da AV1 o aluno acertou (sem passar pela nota). A nota eh calculada no export: acertos * (10 - soma dos valores dos TDEs da G1) / 10
+  acertosAV1        Float?            // acertos da AV1 em multiplos de 0,5 (0..10). Nota = acertos * (10 - soma dos valores dos TDEs da G1) / 10
   notaAV2           Float?            // nota da avaliacao presencial da G2
   provasIndividuais ProvaIndividual[]
 

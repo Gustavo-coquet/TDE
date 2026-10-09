@@ -62,8 +62,8 @@ alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
       return res.status(400).json({ erro: "Valor invalido." });
     }
     if (campo === "acertosAV1") {
-      if (!Number.isInteger(num) || num < 0 || num > 10) {
-        return res.status(400).json({ erro: "Acertos precisa ser um numero inteiro de 0 a 10." });
+      if (num < 0 || num > 10 || !Number.isInteger(num * 2)) {
+        return res.status(400).json({ erro: "Acertos precisa estar entre 0 e 10, em multiplos de 0,5." });
       }
     } else {
       if (num < 0 || num > 10) {
