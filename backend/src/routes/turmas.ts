@@ -66,7 +66,7 @@ turmasRouter.get("/:id/exportar-resultados", asyncHandler(async (req, res) => {
 
   res.json({
     turmaNome: turma.nome,
-    tdes: provas.map((p) => ({ id: p.id, titulo: p.titulo, valor: p.valor, grupoAvaliacao: p.grupoAvaliacao })),
+    tdes: provas.map((p) => ({ id: p.id, titulo: p.titulo, valor: p.valor, grupoAvaliacao: p.grupoAvaliacao, ordem: (p as any).ordem ?? null })),
     alunos: alunos.map((a) => ({
       matricula: a.matricula,
       nome: a.nome,

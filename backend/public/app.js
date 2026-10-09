@@ -398,6 +398,21 @@ async function renderTurmas() {
       try {
         const dados = await api(`/turmas/${btn.dataset.exportarTurma}/exportar-resultados`);
         if (dados.alunos.length === 0) throw new Error("Esta turma ainda nao tem alunos.");
+        // garante que as colunas saem na mesma ordem dos cards: ordena por `ordem`
+        // (nulls no fim, criadoEm como desempate secundario). O mapa oldIdx->newIdx
+        // tambem reindexa as notas de cada aluno pra o TDE certo.
+        {
+          const comIdx = dados.tdes.map((t, i) => ({ t, i }));
+          comIdx.sort((a, b) => {
+            const oa = a.t.ordem == null ? Infinity : a.t.ordem;
+            const ob = b.t.ordem == null ? Infinity : b.t.ordem;
+            return oa - ob || a.i - b.i;
+          });
+          const novosTdes = comIdx.map((x) => x.t);
+          const ordemAntiga = comIdx.map((x) => x.i);
+          dados.tdes = novosTdes;
+          dados.alunos = dados.alunos.map((a) => ({ ...a, notas: ordemAntiga.map((i) => a.notas[i]) }));
+        }
         // Monta a planilha. Estrutura: Matricula, Nome, (bloco G1), (bloco G2), (sem grupo).
         // Cada bloco de grupo G leva: um TDE por coluna, depois "Total TDE (G)",
         // depois "Nota AVn" (vazia, pro professor preencher) e depois a coluna final
