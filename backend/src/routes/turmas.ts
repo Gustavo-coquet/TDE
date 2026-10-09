@@ -71,7 +71,7 @@ turmasRouter.get("/:id/exportar-resultados", asyncHandler(async (req, res) => {
       matricula: a.matricula,
       nome: a.nome,
       notas: provas.map((p) => (nota.has(p.id + ":" + a.id) ? nota.get(p.id + ":" + a.id) : null)),
-      notaAV1: (a as any).notaAV1 ?? null,
+      acertosAV1: (a as any).acertosAV1 ?? null,
       notaAV2: (a as any).notaAV2 ?? null,
     })),
   });

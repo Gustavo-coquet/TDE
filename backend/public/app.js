@@ -436,7 +436,12 @@ async function renderTurmas() {
           const empurraNum = (c, v, fmt) => { if (v !== null && v !== undefined) metaNumericas.push({ r, c, v, fmt }); };
           for (const i of idxG1) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
           if (idxG1.length) empurraNum(pos.totalG1, Math.ceil(soma(a, idxG1) * 10) / 10, "0.##");
-          if (idxG1.length) empurraNum(pos.avG1, a.notaAV1, "0.##");  // valor digitado pelo professor, se houver
+          // Nota AV1 = acertos × (10 − soma dos valores dos TDEs da G1) / 10. Fica vazia se o
+          // professor ainda nao digitou os acertos daquele aluno.
+          if (idxG1.length && a.acertosAV1 !== null && a.acertosAV1 !== undefined) {
+            const pontosAV1 = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
+            empurraNum(pos.avG1, Math.round(Number(a.acertosAV1) * pontosAV1 / 10 * 100) / 100, "0.##");
+          }
           for (const i of idxG2) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
           if (idxG2.length) empurraNum(pos.totalG2, Math.ceil(soma(a, idxG2) * 10) / 10, "0.##");
           if (idxG2.length) empurraNum(pos.avG2, a.notaAV2, "0.##");
@@ -544,9 +549,10 @@ async function renderTurmaDetalhe() {
             <div class="row" style="padding:8px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}; align-items:center; flex-wrap:wrap; gap:8px;">
               <span style="font-size:13px; flex:1 1 220px;">${a.nome} <span class="mono muted" style="font-size:11px;">— matrícula ${a.matricula}</span></span>
               <div style="display:flex; align-items:center; gap:6px; font-size:11px;">
-                <label style="color:var(--ink-faint);">AV1</label>
-                <input data-nota-av="notaAV1" data-aluno="${a.id}" type="number" step="0.1" min="0" max="10" value="${a.notaAV1 ?? ""}" placeholder="—" style="width:60px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G1 (0 a 10)" />
-                <label style="color:var(--ink-faint); margin-left:6px;">AV2</label>
+                <label style="color:var(--ink-faint);" title="Quantas das 10 questões da AV1 o aluno acertou. A nota sai de acertos × (10 - soma dos TDEs da G1) / 10.">Acertos AV1</label>
+                <input data-nota-av="acertosAV1" data-aluno="${a.id}" type="number" step="1" min="0" max="10" value="${a.acertosAV1 ?? ""}" placeholder="—" style="width:52px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Quantas das 10 questões a aluno acertou (inteiro 0 a 10). A nota é calculada: acertos × (10 − soma dos valores dos TDEs da G1) / 10." />
+                <span style="color:var(--ink-faint); font-size:10px;">/10</span>
+                <label style="color:var(--ink-faint); margin-left:10px;" title="Nota direta da AV2 (0 a 10). Discursiva, pesos variáveis — você digita a nota final já calculada.">Nota AV2</label>
                 <input data-nota-av="notaAV2" data-aluno="${a.id}" type="number" step="0.1" min="0" max="10" value="${a.notaAV2 ?? ""}" placeholder="—" style="width:60px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G2 (0 a 10)" />
                 <span id="erro-av-${a.id}" class="mono" style="color:var(--red); font-size:10px;"></span>
               </div>
