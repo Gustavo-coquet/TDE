@@ -650,6 +650,11 @@ async function renderTurmaDetalhe() {
 
   content.querySelectorAll("[data-nota-av]").forEach((el) => {
     el.dataset.prev = el.value;
+    // scroll do mouse em cima do input de numero muda o valor por padrao no Chrome;
+    // bloqueia essa mudanca e tira o foco, pra o scroll seguir pra pagina sem alterar nada.
+    el.addEventListener("wheel", (ev) => {
+      if (document.activeElement === el) { ev.preventDefault(); el.blur(); }
+    }, { passive: false });
     el.addEventListener("change", async () => {
       const campo = el.dataset.notaAv;
       const alunoId = el.dataset.aluno;
