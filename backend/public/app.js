@@ -508,10 +508,12 @@ async function renderTurmas() {
         const primeiraCol = (idxs) => idxs.length ? idxColTde[idxs[0]] : -1;
         const firstG1 = primeiraCol(idxG1);
         const firstG2 = primeiraCol(idxG2);
+        // Formula: ROUNDUP(SUM(...), 1) — soma TDEs+AV ignorando texto e arredonda PRA CIMA
+        // com 1 casa decimal (7,67 -> 7,7; 7,70 fica igual).
         for (let r = 1; r < matriz.length; r++) {
           const linhaExcel = r + 1;
-          if (pos.g1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g1 })] = { t: "n", f: `SUM(${colL(firstG1)}${linhaExcel}:${colL(pos.avG1)}${linhaExcel})` };
-          if (pos.g2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g2 })] = { t: "n", f: `SUM(${colL(firstG2)}${linhaExcel}:${colL(pos.avG2)}${linhaExcel})` };
+          if (pos.g1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g1 })] = { t: "n", f: `ROUNDUP(SUM(${colL(firstG1)}${linhaExcel}:${colL(pos.avG1)}${linhaExcel}),1)` };
+          if (pos.g2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g2 })] = { t: "n", f: `ROUNDUP(SUM(${colL(firstG2)}${linhaExcel}:${colL(pos.avG2)}${linhaExcel}),1)` };
         }
 
         // Nota final G1/G2 calculada no cliente so pra decidir a cor de fundo. "Nao Fez" e
@@ -601,20 +603,36 @@ async function renderTurmas() {
         if (tipo === "pdf") {
           // ---------- PDF ----------
           const { jsPDF } = window.jspdf;
-          const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+          const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
           doc.setFontSize(13);
           doc.text(nomeTurma, 24, 28);
-          doc.setFontSize(10);
+          doc.setFontSize(9);
           doc.setTextColor(110);
-          doc.text(`Resultados — gerado em ${new Date().toLocaleString("pt-BR")}`, 24, 44);
+          // Data da prova = ultimo prazoFinal entre os TDEs do grupo (a prova foi no dia da
+          // entrega dos TDEs). Mostra o dia e o dia da semana por extenso em pt-BR.
+          const diasSemana = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+          const dataGrupo = (idxs) => {
+            const ds = idxs.map((i) => dados.tdes[i].prazoFinal).filter(Boolean).map((x) => new Date(x));
+            return ds.length ? new Date(Math.max(...ds.map((d) => d.getTime()))) : null;
+          };
+          const fmtData = (d) => d ? `${d.toLocaleDateString("pt-BR")} (${diasSemana[d.getDay()]})` : null;
+          const dAV1 = fmtData(dataGrupo(idxG1));
+          const dAV2 = fmtData(dataGrupo(idxG2));
+          const linhasCab = [];
+          if (dAV1) linhasCab.push("Data da AV1: " + dAV1);
+          if (dAV2) linhasCab.push("Data da AV2: " + dAV2);
+          linhasCab.push("Resultados — gerado em " + new Date().toLocaleString("pt-BR"));
+          linhasCab.forEach((t, i) => doc.text(t, 24, 44 + i * 12));
           doc.setTextColor(0);
+          const startY = 44 + linhasCab.length * 12 + 8;
 
           // monta linhas pra o autoTable, convertendo numeros pro padrao BR (0,83) e deixando
           // texto ("Nao Fez" / "Faltou") passar direto. Guarda o valor cru pra decidir cor.
           const fmtBR = (v) => typeof v === "number" ? String(+Number(v).toFixed(2)).replace(".", ",") : v;
-          // calcula valor atual de G1 e G2 pra pintar as celulas finais (ignora texto como 0)
-          const g1Val = dados.alunos.map(gFinalG1);
-          const g2Val = dados.alunos.map(gFinalG2);
+          // G1/G2 no PDF saem arredondados PRA CIMA com 1 casa (igual ROUNDUP(soma,1))
+          const ceilG = (v) => Math.ceil(v * 10) / 10;
+          const g1Val = dados.alunos.map((a) => { const v = gFinalG1(a); return v == null ? null : ceilG(v); });
+          const g2Val = dados.alunos.map((a) => { const v = gFinalG2(a); return v == null ? null : ceilG(v); });
 
           const corpo = dados.alunos.map((a, k) => cabecalho.map((_, c) => {
             if (c === 0) return a.matricula;
@@ -633,18 +651,19 @@ async function renderTurmas() {
           doc.autoTable({
             head: [cabecalho],
             body: corpo,
-            startY: 56,
+            startY,
             theme: "grid",
-            styles: { font: "helvetica", fontSize: 9, cellPadding: 3, overflow: "linebreak", valign: "middle", textColor: 20, lineColor: [160, 160, 160] },
-            headStyles: { fillColor: [252, 213, 181], textColor: 20, fontStyle: "normal", halign: "center" },
+            // retrato A4 e estreito; usa fonte menor e deixa autoTable encaixar as colunas
+            styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2, overflow: "linebreak", valign: "middle", textColor: 20, lineColor: [160, 160, 160] },
+            headStyles: { fillColor: [252, 213, 181], textColor: 20, fontStyle: "normal", halign: "center", fontSize: 7.5 },
             columnStyles: {
-              0: { halign: "left", cellWidth: 55 },
-              1: { halign: "left", cellWidth: 150 },
+              0: { halign: "left", cellWidth: 45 },
+              1: { halign: "left", cellWidth: 110 },
             },
             didParseCell: (data) => {
               const c = data.column.index, r = data.row.index;
               if (data.section === "head") {
-                if (c === pos.g1 || c === pos.g2) { data.cell.styles.fontStyle = "bold"; data.cell.styles.fontSize = 10; }
+                if (c === pos.g1 || c === pos.g2) { data.cell.styles.fontStyle = "bold"; data.cell.styles.fontSize = 8.5; }
                 else if (c === pos.avG1 || c === pos.avG2) { data.cell.styles.fontStyle = "bold"; }
                 data.cell.styles.halign = "center";
               } else if (data.section === "body") {
@@ -652,7 +671,7 @@ async function renderTurmas() {
                 if (c === pos.avG1 || c === pos.avG2) data.cell.styles.fontStyle = "bold";
                 if (c === pos.g1 || c === pos.g2) {
                   data.cell.styles.fontStyle = "bold";
-                  data.cell.styles.fontSize = 10;
+                  data.cell.styles.fontSize = 8.5;
                   const v = c === pos.g1 ? g1Val[r] : g2Val[r];
                   if (v != null) data.cell.styles.fillColor = v >= 6 ? [217, 225, 242] : [255, 242, 204];
                 }
