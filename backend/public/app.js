@@ -358,10 +358,16 @@ async function renderTurmas() {
             <span>${t.totalAlunos} alunos</span>
             <span>${t.totalTdes} TDEs</span>
           </div>
-          <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}"
-                  style="font-size:11px; padding:4px 10px; width:100%; justify-content:center;">
-            Exportar resultados
-          </button>
+          <div style="display:flex; gap:4px;">
+            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="xlsx"
+                    style="font-size:11px; padding:4px 10px; flex:1; justify-content:center;">
+              Excel
+            </button>
+            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="pdf"
+                    style="font-size:11px; padding:4px 10px; flex:1; justify-content:center;">
+              PDF
+            </button>
+          </div>
         </div>
       `).join("")}
       ${turmas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px; grid-column:1/-1;">${corners()}Nenhuma turma cadastrada ainda. Crie a primeira acima.</div>` : ""}
@@ -396,6 +402,7 @@ async function renderTurmas() {
       const textoOriginal = btn.textContent;
       btn.textContent = "Gerando...";
       try {
+        const tipo = btn.dataset.tipo || "xlsx";
         const dados = await api(`/turmas/${btn.dataset.exportarTurma}/exportar-resultados`);
         if (dados.alunos.length === 0) throw new Error("Esta turma ainda nao tem alunos.");
         // garante que as colunas saem na mesma ordem dos cards: ordena por `ordem`
@@ -589,10 +596,76 @@ async function renderTurmas() {
         // garante que o range cobre todo o retangulo (pra o estilo das celulas vazias valer)
         ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: matriz.length - 1, c: cabecalho.length - 1 } });
 
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Notas");
-        const nomeArquivo = `Resultados - ${nomeTurma}`.replace(/[\\/:*?"<>|]/g, "").trim() + ".xlsx";
-        XLSX.writeFile(wb, nomeArquivo);
+        const baseNome = `Resultados - ${nomeTurma}`.replace(/[\\/:*?"<>|]/g, "").trim();
+
+        if (tipo === "pdf") {
+          // ---------- PDF ----------
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+          doc.setFontSize(13);
+          doc.text(nomeTurma, 24, 28);
+          doc.setFontSize(10);
+          doc.setTextColor(110);
+          doc.text(`Resultados — gerado em ${new Date().toLocaleString("pt-BR")}`, 24, 44);
+          doc.setTextColor(0);
+
+          // monta linhas pra o autoTable, convertendo numeros pro padrao BR (0,83) e deixando
+          // texto ("Nao Fez" / "Faltou") passar direto. Guarda o valor cru pra decidir cor.
+          const fmtBR = (v) => typeof v === "number" ? String(+Number(v).toFixed(2)).replace(".", ",") : v;
+          // calcula valor atual de G1 e G2 pra pintar as celulas finais (ignora texto como 0)
+          const g1Val = dados.alunos.map(gFinalG1);
+          const g2Val = dados.alunos.map(gFinalG2);
+
+          const corpo = dados.alunos.map((a, k) => cabecalho.map((_, c) => {
+            if (c === 0) return a.matricula;
+            if (c === 1) return a.nome;
+            // procura em metaTextos/metaNumericas pela celula correspondente a esta linha (k+1)
+            const r = k + 1;
+            const tx = metaTextos.find((m) => m.r === r && m.c === c);
+            if (tx) return tx.v;
+            const nu = metaNumericas.find((m) => m.r === r && m.c === c);
+            if (nu) return fmtBR(nu.v);
+            if (c === pos.g1) return g1Val[k] == null ? "" : fmtBR(g1Val[k]);
+            if (c === pos.g2) return g2Val[k] == null ? "" : fmtBR(g2Val[k]);
+            return "";
+          }));
+
+          doc.autoTable({
+            head: [cabecalho],
+            body: corpo,
+            startY: 56,
+            theme: "grid",
+            styles: { font: "helvetica", fontSize: 9, cellPadding: 3, overflow: "linebreak", valign: "middle", textColor: 20, lineColor: [160, 160, 160] },
+            headStyles: { fillColor: [252, 213, 181], textColor: 20, fontStyle: "normal", halign: "center" },
+            columnStyles: {
+              0: { halign: "left", cellWidth: 55 },
+              1: { halign: "left", cellWidth: 150 },
+            },
+            didParseCell: (data) => {
+              const c = data.column.index, r = data.row.index;
+              if (data.section === "head") {
+                if (c === pos.g1 || c === pos.g2) { data.cell.styles.fontStyle = "bold"; data.cell.styles.fontSize = 10; }
+                else if (c === pos.avG1 || c === pos.avG2) { data.cell.styles.fontStyle = "bold"; }
+                data.cell.styles.halign = "center";
+              } else if (data.section === "body") {
+                if (c > 1) data.cell.styles.halign = "center";
+                if (c === pos.avG1 || c === pos.avG2) data.cell.styles.fontStyle = "bold";
+                if (c === pos.g1 || c === pos.g2) {
+                  data.cell.styles.fontStyle = "bold";
+                  data.cell.styles.fontSize = 10;
+                  const v = c === pos.g1 ? g1Val[r] : g2Val[r];
+                  if (v != null) data.cell.styles.fillColor = v >= 6 ? [217, 225, 242] : [255, 242, 204];
+                }
+              }
+            },
+          });
+          doc.save(baseNome + ".pdf");
+        } else {
+          // ---------- XLSX ----------
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "Notas");
+          XLSX.writeFile(wb, baseNome + ".xlsx");
+        }
       } catch (e) {
         alert("Erro ao exportar: " + e.message);
       } finally {
