@@ -648,18 +648,36 @@ async function renderTurmas() {
             return "";
           }));
 
+          // Larguras: Matricula estreita, colunas de nota estreitas (so cabem 1 ou 2 digitos
+          // com virgula), cabecalhos como "TDE 1 (vale 0,75)" quebram em 2 linhas automatico.
+          // A sobra vai pra coluna Nome, pra o nome do aluno caber inteiro em 1 linha.
+          const PAGE_W = 595, MARGIN = 24;
+          const avail = PAGE_W - MARGIN * 2;
+          const wMat = 48, wTDE = 38, wAV = 46, wG = 40;
+          let usado = wMat;
+          for (let c = 2; c < cabecalho.length; c++) {
+            if (c === pos.g1 || c === pos.g2) usado += wG;
+            else if (c === pos.avG1 || c === pos.avG2) usado += wAV;
+            else usado += wTDE;
+          }
+          const wNome = Math.max(130, avail - usado);
+          const columnStyles = {
+            0: { halign: "left", cellWidth: wMat },
+            1: { halign: "left", cellWidth: wNome },
+          };
+          for (let c = 2; c < cabecalho.length; c++) {
+            const w = (c === pos.g1 || c === pos.g2) ? wG : (c === pos.avG1 || c === pos.avG2) ? wAV : wTDE;
+            columnStyles[c] = { cellWidth: w, halign: "center" };
+          }
           doc.autoTable({
             head: [cabecalho],
             body: corpo,
             startY,
+            margin: { left: MARGIN, right: MARGIN },
             theme: "grid",
-            // retrato A4 e estreito; usa fonte menor e deixa autoTable encaixar as colunas
-            styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2, overflow: "linebreak", valign: "middle", textColor: 20, lineColor: [160, 160, 160] },
-            headStyles: { fillColor: [252, 213, 181], textColor: 20, fontStyle: "normal", halign: "center", fontSize: 7.5 },
-            columnStyles: {
-              0: { halign: "left", cellWidth: 45 },
-              1: { halign: "left", cellWidth: 110 },
-            },
+            styles: { font: "helvetica", fontSize: 8, cellPadding: 2, overflow: "linebreak", valign: "middle", textColor: 20, lineColor: [160, 160, 160] },
+            headStyles: { fillColor: [252, 213, 181], textColor: 20, fontStyle: "normal", halign: "center", fontSize: 7.5, overflow: "linebreak", valign: "middle" },
+            columnStyles,
             didParseCell: (data) => {
               const c = data.column.index, r = data.row.index;
               if (data.section === "head") {
