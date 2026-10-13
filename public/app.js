@@ -1,0 +1,2271 @@
+const state = {
+  view: "turmas",
+  turmaAtualId: null,
+  provaAtualId: null,
+  questoes: [],
+  turmas: [],
+  selecionadas: new Set(),
+  embaralharQuestoes: true, // true = ordem sorteada por aluno; false = ordem fixa (a que o professor clicou)
+  alunosSelecionados: new Set(),
+  publicarResultado: null,
+  novaQuestaoVars: [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }],
+  novaQuestaoEtapas: [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true, notacaoCientifica: false }],
+  editandoQuestaoId: null,
+  editandoQuestaoDados: null,
+  novaQuestaoImagem: null,
+  filtroBanco: { disciplina: "", assunto: "", busca: "" },
+  filtroMontar: { disciplina: "", assunto: "", busca: "" },
+  alunosSelecionadosInicializado: false,
+  // Campos do formulário de novo TDE. Ficam no state porque a tela é redesenhada
+  // inteira a cada clique numa questão/aluno — sem isso, o que o professor digitou
+  // voltaria ao valor padrão toda vez.
+  novoTde: { titulo: "TDE 1", valor: "10", prazo: "" },
+};
+
+// escapa aspas e sinais de menor/maior pra usar valores do state dentro de atributos HTML
+function attr(v) {
+  return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+const content = document.getElementById("content");
+const navEl = document.getElementById("nav");
+
+navEl.querySelectorAll(".nav-item").forEach((el) => {
+  el.addEventListener("click", () => setView(el.dataset.view));
+});
+
+function setView(view, extra) {
+  state.view = view;
+  if (extra) Object.assign(state, extra);
+  const destaque = view === "turmaDetalhe" || view === "montar" || view === "simular" ? "turmas" : view;
+  navEl.querySelectorAll(".nav-item").forEach((el) => el.classList.toggle("active", el.dataset.view === destaque));
+  render();
+}
+
+function corners() {
+  return `<div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>`;
+}
+
+function disciplinasDe(questoes) {
+  return Array.from(new Set(questoes.map((q) => q.disciplina))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+function assuntosDe(questoes, disciplina) {
+  const base = disciplina ? questoes.filter((q) => q.disciplina === disciplina) : questoes;
+  return Array.from(new Set(base.map((q) => q.assunto))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+function aplicarFiltro(questoes, filtro) {
+  const busca = filtro.busca.trim().toLowerCase();
+  return questoes.filter((q) => {
+    if (filtro.disciplina && q.disciplina !== filtro.disciplina) return false;
+    if (filtro.assunto && q.assunto !== filtro.assunto) return false;
+    if (busca && !(`${q.disciplina} ${q.assunto} ${q.enunciado}`.toLowerCase().includes(busca))) return false;
+    return true;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// FIGURA DO BLOCO
+// As questões encadeadas de um mesmo grupo são a mesma figura. Em vez de subir o mesmo
+// arquivo 14 vezes (e guardar 14 cópias do base64 no banco e no JSON que trafega), só
+// UMA questão do grupo carrega a imagem — as outras encontram a dela aqui, na hora de
+// exibir. Nada é copiado: o campo "imagem" das outras continua vazio no banco.
+function figuraDe(q, todas) {
+  if (q.imagem) return q.imagem;
+  const g = q.grupoVariaveis || q.grupo || null;
+  if (!g || !Array.isArray(todas)) return null;
+  const dona = todas.find((o) => (o.grupoVariaveis || o.grupo) === g && o.imagem);
+  return dona ? dona.imagem : null;
+}
+
+// O "Dados: ..." é igual em todas as questões de um bloco. Na simulação (e na prova do
+// aluno) ele aparece UMA vez no topo: achamos o maior trecho final comum aos enunciados.
+// Não precisa de marcador no texto — é deduzido do próprio enunciado.
+function sufixoComum(textos) {
+  if (textos.length < 2) return "";
+  const menor = Math.min(...textos.map((t) => t.length));
+  let n = 0;
+  while (n < menor && textos.every((t) => t[t.length - 1 - n] === textos[0][textos[0].length - 1 - n])) n++;
+  if (n < 40) return "";
+  let comum = textos[0].slice(textos[0].length - n);
+  const quebra = comum.indexOf("\n");
+  if (quebra < 0) return "";
+  comum = comum.slice(quebra + 1);
+  return comum.trim().length >= 30 ? comum : "";
+}
+
+// ---------------------------------------------------------------------------
+// BLOCOS de questões encadeadas
+// Questões com o MESMO "grupoVariaveis" recebem os mesmos valores sorteados: uma pede a
+// reação de apoio, a outra o cortante que sai dela, a outra o momento. Sozinhas elas não
+// fazem sentido, e mandar só uma pro TDE deixaria o aluno sem o encadeamento. Por isso
+// aqui elas aparecem dentro de uma moldura só e entram/saem da prova em bloco.
+function blocosDe(filtradas, todas) {
+  // se o filtro pegou parte de um bloco, o bloco inteiro vem junto — encadeadas não se separam
+  const gruposVisiveis = new Set(filtradas.map((q) => q.grupoVariaveis).filter(Boolean));
+  const lista = todas.filter((q) => filtradas.includes(q) || gruposVisiveis.has(q.grupoVariaveis));
+  const blocos = [];
+  const indice = new Map();
+  for (const q of lista) {
+    const g = q.grupoVariaveis || null;
+    if (!g) { blocos.push({ grupo: null, questoes: [q] }); continue; }
+    if (!indice.has(g)) { const b = { grupo: g, questoes: [] }; indice.set(g, b); blocos.push(b); }
+    indice.get(g).questoes.push(q);
+  }
+  return blocos;
+}
+
+// Paleta dos blocos. Cada bloco pega uma cor, e dois blocos VIZINHOS nunca ficam com a
+// mesma — a cor sai de um hash do nome do grupo (então "viga-A" tende a ser sempre a mesma
+// cor, em qualquer tela) e só muda se colidir com a do bloco imediatamente acima.
+const PALETA_BLOCO = [
+  { nome: "âmbar",  rgb: "232,163,61"  },
+  { nome: "verde",  rgb: "127,216,143" },
+  { nome: "azul",   rgb: "109,166,255" },
+  { nome: "rosa",   rgb: "231,125,176" },
+  { nome: "marrom", rgb: "192,124,78"  },
+];
+
+function hashGrupo(texto) {
+  let h = 0;
+  for (let i = 0; i < texto.length; i++) h = (h * 31 + texto.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+// devolve um Map grupo -> cor, já resolvendo o choque entre blocos consecutivos
+function coresDosBlocos(blocos) {
+  const mapa = new Map();
+  let anterior = -1;
+  for (const b of blocos) {
+    if (!b.grupo) continue;
+    let i = hashGrupo(b.grupo) % PALETA_BLOCO.length;
+    if (i === anterior) i = (i + 1) % PALETA_BLOCO.length;
+    mapa.set(b.grupo, PALETA_BLOCO[i]);
+    anterior = i;
+  }
+  return mapa;
+}
+
+// moldura do bloco: usada no Novo TDE (clicável, marca tudo) e no Banco (só visual)
+function molduraBloco(b, ativo, dentro, clicavel, cor, comApagar = false) {
+  // A cor identifica o BLOCO; o verde-água do checkbox continua significando "selecionado".
+  const c = (cor || PALETA_BLOCO[0]).rgb;
+  // miniatura da figura do bloco, pra reconhecer de relance qual viga/peça é
+  const fig = b.questoes.map((q) => q.imagem).find(Boolean);
+  return `
+    <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid rgba(${c},${ativo ? ".55" : ".35"});
+         border-left:4px solid rgba(${c},${ativo ? "1" : ".6"});
+         background:rgba(${c},${ativo ? ".10" : ".05"});
+         box-shadow:${ativo ? `inset 0 0 0 1px rgba(${c},.12)` : "none"};
+         padding:11px 12px 3px; margin-bottom:14px; ${clicavel ? "cursor:pointer;" : ""}">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        ${clicavel ? `<div class="checkbox ${ativo ? "on" : ""}">${ativo ? "✓" : (b.parcial ? "–" : "")}</div>` : ""}
+        <div style="flex:1; min-width:0;">
+          <div class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:rgb(${c}); font-weight:600;">
+            Bloco encadeado · ${b.grupo}
+          </div>
+          <div class="mono" style="font-size:11px; margin-top:2px; color:rgba(${c},.72);">
+            ${b.questoes.length} questões — mesmos valores sorteados, entram e saem juntas
+          </div>
+        </div>
+        ${fig ? `<img src="${fig}" alt="figura do bloco" style="flex-shrink:0; max-height:110px; max-width:280px; width:auto; height:auto; background:#fff; border:1px solid rgba(${c},.5);" />` : ""}
+        ${comApagar ? `<button class="btn danger" style="font-size:10.5px; padding:3px 8px; flex-shrink:0;" data-apagar-bloco="${attr(b.grupo)}" data-qtd="${b.questoes.length}">Apagar bloco</button>` : ""}
+      </div>
+      ${dentro}
+    </div>`;
+}
+
+// título curto de uma questão dentro de um bloco: as respostas que ela pede.
+// "Va = {Va} kN · Vb = {Vb} kN" vira "Va · Vb" — serve de índice do bloco.
+function rotuloRespostas(q) {
+  const achados = (q.formatoResposta || "").match(/\{([^}]+)\}/g);
+  return achados ? achados.map((n) => n.slice(1, -1)).join(" · ") : q.assunto;
+}
+
+// uma questão na lista do Novo TDE. Dentro de um bloco ela não repete disciplina/assunto
+// (são iguais nas 12) e não é clicável sozinha — quem manda é a moldura.
+function itemQuestaoMontar(q, dentroDeBloco, cor) {
+  const sel = state.selecionadas.has(q.id);
+  const marca = sel ? (state.embaralharQuestoes ? "✓" : String(Array.from(state.selecionadas).indexOf(q.id) + 1)) : "";
+  const cabeca = dentroDeBloco ? "" : `
+                    <div style="min-width:0;">
+                      <div class="mono muted" style="font-size:10.5px;">${q.disciplina}</div>
+                      <div style="font-weight:600; font-size:13.5px;">${q.assunto}</div>
+                    </div>`;
+  return `
+            <div class="list-item ${sel ? "checked" : ""}" ${dentroDeBloco ? "" : `data-toggle-questao="${q.id}"`}
+                 style="align-items:flex-start; ${dentroDeBloco ? "background:var(--surface-raised); cursor:inherit;" : ""}">
+              <div class="checkbox ${sel ? "on" : ""}" style="margin-top:2px;">${marca}</div>
+              <div style="flex:1; min-width:0;">
+                <div class="row" style="align-items:flex-start; gap:8px;">
+                  ${cabeca}
+                  ${dentroDeBloco && q.imagem ? `<span class="mono" style="flex-shrink:0; font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:rgb(${(cor || PALETA_BLOCO[0]).rgb}); border:1px solid rgba(${(cor || PALETA_BLOCO[0]).rgb},.5); padding:1px 5px; margin-left:auto;">figura do bloco</span>` : ""}
+                  <div class="dots" style="flex-shrink:0; ${dentroDeBloco && q.imagem ? "margin-left:8px;" : "margin-left:auto;"}">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
+                </div>
+                <div class="mono muted" style="font-size:11px; margin-top:${dentroDeBloco ? "0" : "6px"}; line-height:1.5; max-height:54px; overflow:hidden;">${formatarEnunciado(q.preview && q.preview.enunciado ? q.preview.enunciado : q.enunciado)}</div>
+              </div>
+              ${!dentroDeBloco && q.imagem ? `<img src="${q.imagem}" alt="figura" style="flex-shrink:0; max-height:70px; max-width:150px; width:auto; height:auto; background:#fff; border:1px solid var(--line);" />` : ""}
+            </div>`;
+}
+
+// monta a barra de filtros (Disciplina / Assunto / busca) reutilizada no Banco e no Novo TDE
+function renderBarraFiltro(idPrefix, questoes, filtro) {
+  const disciplinas = disciplinasDe(questoes);
+  const assuntos = assuntosDe(questoes, filtro.disciplina);
+  return `
+    <div style="display:grid; grid-template-columns:1fr 1fr 1.4fr; gap:8px; margin-bottom:14px;">
+      <select id="${idPrefix}-disciplina" style="background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:7px 8px; font-size:12.5px;">
+        <option value="">Todas as disciplinas</option>
+        ${disciplinas.map((d) => `<option value="${d}" ${filtro.disciplina===d?"selected":""}>${d}</option>`).join("")}
+      </select>
+      <select id="${idPrefix}-assunto" style="background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:7px 8px; font-size:12.5px;">
+        <option value="">Todos os assuntos</option>
+        ${assuntos.map((a) => `<option value="${a}" ${filtro.assunto===a?"selected":""}>${a}</option>`).join("")}
+      </select>
+      <input id="${idPrefix}-busca" placeholder="Buscar no enunciado…" value="${filtro.busca}" style="background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:7px 10px; font-size:12.5px;" />
+    </div>
+  `;
+}
+
+function ligarBarraFiltro(idPrefix, filtro, onChange) {
+  document.getElementById(`${idPrefix}-disciplina`).addEventListener("change", (e) => {
+    filtro.disciplina = e.target.value;
+    filtro.assunto = ""; // muda a disciplina, reseta o assunto selecionado
+    onChange();
+  });
+  document.getElementById(`${idPrefix}-assunto`).addEventListener("change", (e) => {
+    filtro.assunto = e.target.value;
+    onChange();
+  });
+  let debounce;
+  document.getElementById(`${idPrefix}-busca`).addEventListener("input", (e) => {
+    const cursorPos = e.target.selectionStart;
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      filtro.busca = e.target.value;
+      onChange();
+      const novoInput = document.getElementById(`${idPrefix}-busca`);
+      if (novoInput) { novoInput.focus(); novoInput.setSelectionRange(cursorPos, cursorPos); }
+    }, 250);
+  });
+}
+
+function formatarBR(n) {
+  return String(Number(n)).replace(".", ","); // só vírgula decimal, sem separador de milhar
+}
+
+// campos de etapas de texto (ex.: "1º quadrante", vindo de um se(...)) devem aparecer do jeito
+// que estão, sem tentar formatar como número
+function formatarValorCampo(valor, campo) {
+  if (typeof valor === "string") return valor;
+
+  const casas = campo && typeof campo.decimais === "number" ? campo.decimais : null;
+
+  // notação científica: 1840 -> 1,84 × 10³ (o expoente vira sobrescrito na exibição)
+  if (campo && campo.notacaoCientifica) {
+    if (valor === 0) return "0";
+    const expoente = Math.floor(Math.log10(Math.abs(valor)));
+    const mantissa = valor / Math.pow(10, expoente);
+    const mantissaTxt = (casas !== null ? mantissa.toFixed(casas) : String(mantissa)).replace(".", ",");
+    return `${mantissaTxt} × 10^{${expoente}}`;
+  }
+
+  // casas fixas: todas as alternativas exibem a mesma quantidade, senão a correta se destacaria
+  // (ex.: 1,8361 no meio de valores com 2 casas entregaria a resposta)
+  if (casas !== null) return valor.toFixed(casas).replace(".", ",");
+  return formatarBR(valor);
+}
+
+// Aplica a formatação inline (**negrito**, ^{sup}, _{sub}) e escapa HTML por segurança.
+// Não mexe em quebras de linha — serve tanto pro enunciado quanto pra nomes/unidades das respostas.
+function formatarInline(texto) {
+  if (!texto) return "";
+  return String(texto)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/\^\{(.+?)\}/g, "<sup>$1</sup>")
+    .replace(/_\{(.+?)\}/g, "<sub>$1</sub>");
+}
+
+// Remove as marcações sem virar HTML — usado no PDF, que não entende tags.
+function limparMarcacoes(texto) {
+  if (!texto) return "";
+  return String(texto)
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\^\{(.+?)\}/g, "$1")
+    .replace(/_\{(.+?)\}/g, "$1");
+}
+
+// Igual ao formatarInline, mas também converte as quebras de linha em <br> (o navegador as ignora por padrão).
+function formatarEnunciado(texto) {
+  if (!texto) return "";
+  return formatarInline(texto).replace(/\n/g, "<br>");
+}
+
+async function api(path, options) {
+  const res = await fetch(`/api${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.erro || `Erro ${res.status}`);
+  }
+  return res.json();
+}
+
+async function render() {
+  content.innerHTML = `<div class="spinner">Carregando…</div>`;
+  try {
+    if (state.view === "turmas") await renderTurmas();
+    else if (state.view === "turmaDetalhe") await renderTurmaDetalhe();
+    else if (state.view === "banco") await renderBanco();
+    else if (state.view === "montar") await renderMontar();
+    else if (state.view === "simular") renderSimular();
+    else if (state.view === "resultados") await renderResultados();
+  } catch (e) {
+    content.innerHTML = `<div class="error-box">Erro: ${e.message}. Confira se o backend está rodando e o banco foi migrado.</div>`;
+  }
+}
+
+/* ---------------- Turmas (lista) ---------------- */
+async function renderTurmas() {
+  const turmas = await api("/turmas");
+  state.turmas = turmas;
+
+  content.innerHTML = `
+    <div class="eyebrow">TURMAS</div>
+    <h1 style="margin-bottom:20px;">${turmas.length} turmas cadastradas</h1>
+
+    <div class="card" style="margin-bottom:20px; max-width:420px;">
+      ${corners()}
+      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:12px;">Nova turma</div>
+      <div class="field"><label>Nome da turma</label><input id="nova-turma-nome" placeholder="Ex: 3º Ano A — Física" /></div>
+      <div id="erro-turma"></div>
+      <button class="btn" id="btn-criar-turma">+ Criar turma</button>
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:14px;">
+      ${turmas.map((t) => `
+        <div class="card" style="cursor:pointer; position:relative;" data-turma="${t.id}">
+          ${corners()}
+          <div style="font-weight:600; font-size:15px; margin-bottom:10px; padding-right:4px;">${t.nome}</div>
+          <div class="row" style="font-size:12px; color:var(--ink-faint); margin-bottom:10px;">
+            <span>${t.totalAlunos} alunos</span>
+            <span>${t.totalTdes} TDEs</span>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="xlsx"
+                    style="font-size:11px; padding:4px 10px; flex:1; justify-content:center;">
+              Excel
+            </button>
+            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="pdf"
+                    style="font-size:11px; padding:4px 10px; flex:1; justify-content:center;">
+              PDF
+            </button>
+          </div>
+        </div>
+      `).join("")}
+      ${turmas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px; grid-column:1/-1;">${corners()}Nenhuma turma cadastrada ainda. Crie a primeira acima.</div>` : ""}
+    </div>
+  `;
+
+  document.getElementById("btn-criar-turma").addEventListener("click", async () => {
+    const nome = document.getElementById("nova-turma-nome").value.trim();
+    const erroEl = document.getElementById("erro-turma");
+    if (!nome) { erroEl.innerHTML = `<div class="error-box">Digite o nome da turma.</div>`; return; }
+    try {
+      await api("/turmas", { method: "POST", body: JSON.stringify({ nome }) });
+      renderTurmas();
+    } catch (e) {
+      erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
+    }
+  });
+
+  content.querySelectorAll("[data-turma]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-exportar-turma]")) return; // o clique no botao nao abre a turma
+      setView("turmaDetalhe", { turmaAtualId: el.dataset.turma });
+    });
+  });
+
+  content.querySelectorAll("[data-exportar-turma]").forEach((el) => {
+    el.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const btn = ev.currentTarget;
+      const nomeTurma = btn.dataset.nome;
+      btn.disabled = true;
+      const textoOriginal = btn.textContent;
+      btn.textContent = "Gerando...";
+      try {
+        const tipo = btn.dataset.tipo || "xlsx";
+        const dados = await api(`/turmas/${btn.dataset.exportarTurma}/exportar-resultados`);
+        if (dados.alunos.length === 0) throw new Error("Esta turma ainda nao tem alunos.");
+        // garante que as colunas saem na mesma ordem dos cards: ordena por `ordem`
+        // (nulls no fim, criadoEm como desempate secundario). O mapa oldIdx->newIdx
+        // tambem reindexa as notas de cada aluno pra o TDE certo.
+        {
+          const comIdx = dados.tdes.map((t, i) => ({ t, i }));
+          comIdx.sort((a, b) => {
+            const oa = a.t.ordem == null ? Infinity : a.t.ordem;
+            const ob = b.t.ordem == null ? Infinity : b.t.ordem;
+            return oa - ob || a.i - b.i;
+          });
+          const novosTdes = comIdx.map((x) => x.t);
+          const ordemAntiga = comIdx.map((x) => x.i);
+          dados.tdes = novosTdes;
+          dados.alunos = dados.alunos.map((a) => ({ ...a, notas: ordemAntiga.map((i) => a.notas[i]) }));
+        }
+        // O professor pediu UM ARQUIVO POR AVALIACAO: se a turma tem TDEs em G1 e em G2,
+        // sai um Resultados - Turma - G1.xlsx e um Resultados - Turma - G2.xlsx separados.
+        // TDEs sem grupo (se houver) saem num terceiro arquivo "Outros", pra ninguem perder
+        // nota solta. Cada arquivo tem a MESMA estrutura (TDEs → Nota AVn → Gn) e os mesmos
+        // estilos — a unica diferenca eh que so as colunas daquele grupo entram.
+        const idxG1Full = dados.tdes.map((t, i) => t.grupoAvaliacao === "G1" ? i : -1).filter((i) => i >= 0);
+        const idxG2Full = dados.tdes.map((t, i) => t.grupoAvaliacao === "G2" ? i : -1).filter((i) => i >= 0);
+        const idxSGFull = dados.tdes.map((t, i) => !t.grupoAvaliacao ? i : -1).filter((i) => i >= 0);
+        const colTde = (i) => `${dados.tdes[i].titulo} (vale ${formatarBR(dados.tdes[i].valor)})`;
+
+        // lista de arquivos a gerar: um por grupo que tem TDE.
+        const grupos = [];
+        if (idxG1Full.length) grupos.push({ chave: "G1", sufixo: " - G1" });
+        if (idxG2Full.length) grupos.push({ chave: "G2", sufixo: " - G2" });
+        if (idxSGFull.length) grupos.push({ chave: "SG", sufixo: " - Outros" });
+        if (!grupos.length) throw new Error("Nenhum TDE para exportar.");
+
+        for (const grupo of grupos) {
+        // dentro do loop: so os TDEs deste grupo entram. As variaveis idxG1/idxG2/idxSG passam
+        // a ser locais do loop — a chave que nao for do grupo atual fica como array vazio pra
+        // o resto da logica (formulas, cores, PDF) nao precisar mudar.
+        const idxG1 = grupo.chave === "G1" ? idxG1Full : [];
+        const idxG2 = grupo.chave === "G2" ? idxG2Full : [];
+        const idxSG = grupo.chave === "SG" ? idxSGFull : [];
+
+        // monta o cabecalho guardando a POSICAO (coluna 0-indexed) das colunas especiais
+        // de cada grupo pra depois escrever formulas e larguras certinho.
+        const cabecalho = ["Matricula", "Nome"];
+        const idxColTde = {};  // indice do TDE original -> coluna no xlsx
+        const pos = { avG1: -1, g1: -1, avG2: -1, g2: -1 };
+        const empurra = (titulo) => { cabecalho.push(titulo); return cabecalho.length - 1; };
+        // Colunas por grupo: TDEs → Nota AVn → Gn (sem coluna "Total TDE" intermediaria;
+        // a nota final G sai direto do SUM dos TDEs + AV; texto como "Nao Fez" e "Faltou"
+        // sao ignorados pelo SUM automaticamente).
+        for (const i of idxG1) idxColTde[i] = empurra(colTde(i));
+        if (idxG1.length) { pos.avG1 = empurra("Nota AV1"); pos.g1 = empurra("G1"); }
+        for (const i of idxG2) idxColTde[i] = empurra(colTde(i));
+        if (idxG2.length) { pos.avG2 = empurra("Nota AV2"); pos.g2 = empurra("G2"); }
+        for (const i of idxSG) idxColTde[i] = empurra(colTde(i));
+
+        // monta a matriz. Guardamos VALORES NUMERICOS (nao texto "1,9") para que as formulas
+        // =SUM(Total+AV) funcionem — se virasse string com virgula o Excel devolve #VALUE!.
+        // A exibicao com virgula vem do formato de celula (z: "0.##") combinado com a locale
+        // do Excel/LibreOffice do professor, que no Brasil mostra ponto como virgula.
+        const soma = (a, idxs) => idxs.reduce((acc, i) => acc + (a.notas[i] === null || a.notas[i] === undefined ? 0 : Number(a.notas[i])), 0);
+        const num = (v) => (v === null || v === undefined ? null : +Number(v).toFixed(2));
+        const matriz = [cabecalho];
+        const metaNumericas = [];  // {r, c, v} pra atribuir dps como celula numerica
+        const metaTextos = [];     // {r, c, v} pra escrever "Nao Fez" ou "Faltou" como texto
+        dados.alunos.forEach((a, k) => {
+          const r = k + 1;
+          const linha = new Array(cabecalho.length).fill("");
+          linha[0] = a.matricula;
+          linha[1] = a.nome;
+          const empurraNum = (c, v) => { if (v !== null && v !== undefined) metaNumericas.push({ r, c, v }); };
+          const empurraTxt = (c, t) => metaTextos.push({ r, c, v: t });
+          // TDE que o aluno nao fez entra como texto "Nao Fez" (em vez de celula vazia),
+          // AV1 vira "Faltou" se o professor marcou. O SUM final ignora texto, entao a nota
+          // final G nao estoura #VALUE!.
+          for (const i of idxG1) {
+            if (a.notas[i] == null) empurraTxt(idxColTde[i], "Não Fez");
+            else empurraNum(idxColTde[i], num(a.notas[i]));
+          }
+          if (idxG1.length) {
+            if (a.faltouAV1) empurraTxt(pos.avG1, "Faltou");
+            else if (a.acertosAV1 != null) {
+              const pontosAV1 = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
+              empurraNum(pos.avG1, Math.round(Number(a.acertosAV1) * pontosAV1 / 10 * 100) / 100);
+            }
+          }
+          for (const i of idxG2) {
+            if (a.notas[i] == null) empurraTxt(idxColTde[i], "Não Fez");
+            else empurraNum(idxColTde[i], num(a.notas[i]));
+          }
+          if (idxG2.length && a.notaAV2 != null) empurraNum(pos.avG2, a.notaAV2);
+          for (const i of idxSG) {
+            if (a.notas[i] == null) empurraTxt(idxColTde[i], "Não Fez");
+            else empurraNum(idxColTde[i], num(a.notas[i]));
+          }
+          matriz.push(linha);
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(matriz);
+
+        // substitui os valores numericos (criados como string "") por celulas numericas.
+        // Formato "General": inteiros sem casa decimal ("2") e fracoes com casas naturais
+        // ("1,9", "0,83"). Antes era "0.##", que no LibreOffice/Excel-ptBR deixava uma
+        // virgula solta depois dos inteiros ("1,"), bagunçando a leitura.
+        for (const m of metaNumericas) {
+          ws[XLSX.utils.encode_cell({ r: m.r, c: m.c })] = { t: "n", v: m.v };
+        }
+        for (const m of metaTextos) {
+          ws[XLSX.utils.encode_cell({ r: m.r, c: m.c })] = { t: "s", v: m.v };
+        }
+
+        // G1 = SUM(TDEs da G1 : Nota AV1). G2 = SUM(TDEs da G2 : Nota AV2).
+        // Como as colunas sao contiguas (TDEs ... AV), o SUM num intervalo A1:F1 cobre
+        // tudo e, importante, IGNORA automaticamente as celulas que viraram texto ("Nao Fez"
+        // ou "Faltou"), evitando o erro #VALUE! que acontece quando a gente usa + direto.
+        const colL = (c) => XLSX.utils.encode_col(c);
+        const primeiraCol = (idxs) => idxs.length ? idxColTde[idxs[0]] : -1;
+        const firstG1 = primeiraCol(idxG1);
+        const firstG2 = primeiraCol(idxG2);
+        // Formula: ROUNDUP(SUM(...), 1) — soma TDEs+AV ignorando texto e arredonda PRA CIMA
+        // com 1 casa decimal (7,67 -> 7,7; 7,70 fica igual).
+        for (let r = 1; r < matriz.length; r++) {
+          const linhaExcel = r + 1;
+          if (pos.g1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g1 })] = { t: "n", f: `ROUNDUP(SUM(${colL(firstG1)}${linhaExcel}:${colL(pos.avG1)}${linhaExcel}),1)` };
+          if (pos.g2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g2 })] = { t: "n", f: `ROUNDUP(SUM(${colL(firstG2)}${linhaExcel}:${colL(pos.avG2)}${linhaExcel}),1)` };
+        }
+
+        // Nota final G1/G2 calculada no cliente so pra decidir a cor de fundo. "Nao Fez" e
+        // "Faltou" entram como 0 (igual ao que o SUM do Excel faria, ignorando texto).
+        const gFinalG1 = (a) => {
+          if (!idxG1.length) return null;
+          const totalTdes = idxG1.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
+          const pontosAV = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
+          const av = a.faltouAV1 ? 0 : (a.acertosAV1 != null ? Math.round(Number(a.acertosAV1) * pontosAV / 10 * 100) / 100 : 0);
+          return totalTdes + av;
+        };
+        const gFinalG2 = (a) => {
+          if (!idxG2.length) return null;
+          const totalTdes = idxG2.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
+          const av = a.notaAV2 != null ? Number(a.notaAV2) : 0;
+          return totalTdes + av;
+        };
+
+        // larguras das colunas (mesma proporcao do modelo do professor)
+        const larg = new Array(cabecalho.length).fill({ wch: 10 });
+        larg[0] = { wch: 14.83 };   // Matricula
+        larg[1] = { wch: 32.83 };   // Nome
+        for (const i of idxG1) larg[idxColTde[i]] = { wch: 10 };
+        if (pos.avG1 >= 0) { larg[pos.avG1] = { wch: 13 }; larg[pos.g1] = { wch: 10 }; }
+        for (const i of idxG2) larg[idxColTde[i]] = { wch: 10 };
+        if (pos.avG2 >= 0) { larg[pos.avG2] = { wch: 13 }; larg[pos.g2] = { wch: 10 }; }
+        for (const i of idxSG) larg[idxColTde[i]] = { wch: 10 };
+        ws["!cols"] = larg;
+        ws["!rows"] = [{ hpt: 32 }];  // cabecalho mais alto, pra caber duas linhas com wrap
+
+        // ESTILOS: cabecalho com fundo pessego, celulas com borda. Precisa de xlsx-js-style
+        // (drop-in do SheetJS que exporta estilos; carregado em index.html).
+        const bordaFina = { style: "thin", color: { rgb: "808080" } };
+        const borda = { top: bordaFina, bottom: bordaFina, left: bordaFina, right: bordaFina };
+        // paleta e espessuras dos destaques pedidos pelo professor:
+        //  - Total TDE e Nota AV: fonte negrito, tamanho padrao
+        //  - G1 / G2 (nota final): negrito e um ponto maior, com fundo colorido pela nota:
+        //     * >= 6 → azul clarinho (aprovado)
+        //     * <  6 → amarelo clarinho (chamar atencao)
+        const COR_APROVADO = "D9E1F2";  // azul claro
+        const COR_REPROVADO = "FFF2CC"; // amarelo claro
+        const colsTotalOuAV = new Set([pos.avG1, pos.avG2].filter((c) => c >= 0));
+        const colsG = new Set([pos.g1, pos.g2].filter((c) => c >= 0));
+        const estiloHeader = {
+          fill: { patternType: "solid", fgColor: { rgb: "FCD5B5" } },
+          alignment: { horizontal: "center", vertical: "center", wrapText: true },
+          font: { name: "Calibri", sz: 12 },
+          border: borda,
+        };
+        const estiloHeaderBold = { ...estiloHeader, font: { name: "Calibri", sz: 12, bold: true } };
+        const estiloHeaderG   = { ...estiloHeader, font: { name: "Calibri", sz: 13, bold: true } };
+        const estiloEsq = { alignment: { horizontal: "left", vertical: "center" }, font: { name: "Calibri", sz: 12 }, border: borda };
+        const estiloCentrado = { alignment: { horizontal: "center", vertical: "center" }, font: { name: "Calibri", sz: 12 }, border: borda };
+        const estiloBold = { ...estiloCentrado, font: { name: "Calibri", sz: 12, bold: true } };
+        const estiloG = (cor) => ({
+          ...estiloCentrado,
+          font: { name: "Calibri", sz: 13, bold: true },
+          ...(cor ? { fill: { patternType: "solid", fgColor: { rgb: cor } } } : {}),
+        });
+
+        // calcula a cor de G1/G2 por aluno pra pintar as celulas das colunas finais
+        const corPorLinhaG1 = dados.alunos.map((a) => { const v = gFinalG1(a); return v == null ? null : (v >= 6 ? COR_APROVADO : COR_REPROVADO); });
+        const corPorLinhaG2 = dados.alunos.map((a) => { const v = gFinalG2(a); return v == null ? null : (v >= 6 ? COR_APROVADO : COR_REPROVADO); });
+
+        // aplica estilo celula a celula
+        for (let r = 0; r < matriz.length; r++) {
+          for (let c = 0; c < cabecalho.length; c++) {
+            const ref = XLSX.utils.encode_cell({ r, c });
+            if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+            if (r === 0) {
+              ws[ref].s = colsG.has(c) ? estiloHeaderG : colsTotalOuAV.has(c) ? estiloHeaderBold : estiloHeader;
+            } else {
+              if (c <= 1) ws[ref].s = estiloEsq;
+              else if (colsG.has(c)) {
+                const cor = c === pos.g1 ? corPorLinhaG1[r - 1] : corPorLinhaG2[r - 1];
+                ws[ref].s = estiloG(cor);
+              } else if (colsTotalOuAV.has(c)) ws[ref].s = estiloBold;
+              else ws[ref].s = estiloCentrado;
+            }
+          }
+        }
+        // garante que o range cobre todo o retangulo (pra o estilo das celulas vazias valer)
+        ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: matriz.length - 1, c: cabecalho.length - 1 } });
+
+        const baseNome = `Resultados - ${nomeTurma}${grupo.sufixo}`.replace(/[\\/:*?"<>|]/g, "").trim();
+
+        if (tipo === "pdf") {
+          // ---------- PDF ----------
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+          doc.setFontSize(13);
+          const rotuloGrupo = grupo.chave === "SG" ? "Outros TDEs" : grupo.chave;
+          doc.text(`${nomeTurma} — ${rotuloGrupo}`, 24, 28);
+          doc.setFontSize(9);
+          doc.setTextColor(110);
+          // Data da prova = ultimo prazoFinal entre os TDEs do grupo (a prova foi no dia da
+          // entrega dos TDEs). Mostra o dia e o dia da semana por extenso em pt-BR.
+          const diasSemana = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+          const dataGrupo = (idxs) => {
+            const ds = idxs.map((i) => dados.tdes[i].prazoFinal).filter(Boolean).map((x) => new Date(x));
+            return ds.length ? new Date(Math.max(...ds.map((d) => d.getTime()))) : null;
+          };
+          const fmtData = (d) => d ? `${d.toLocaleDateString("pt-BR")} (${diasSemana[d.getDay()]})` : null;
+          const dAV1 = fmtData(dataGrupo(idxG1));
+          const dAV2 = fmtData(dataGrupo(idxG2));
+          const linhasCab = [];
+          if (dAV1) linhasCab.push("Data da AV1: " + dAV1);
+          if (dAV2) linhasCab.push("Data da AV2: " + dAV2);
+          linhasCab.push("Resultados — gerado em " + new Date().toLocaleString("pt-BR"));
+          linhasCab.forEach((t, i) => doc.text(t, 24, 44 + i * 12));
+          doc.setTextColor(0);
+          const startY = 44 + linhasCab.length * 12 + 8;
+
+          // monta linhas pra o autoTable, convertendo numeros pro padrao BR (0,83) e deixando
+          // texto ("Nao Fez" / "Faltou") passar direto. Guarda o valor cru pra decidir cor.
+          const fmtBR = (v) => typeof v === "number" ? String(+Number(v).toFixed(2)).replace(".", ",") : v;
+          // G1/G2 no PDF saem arredondados PRA CIMA com 1 casa (igual ROUNDUP(soma,1))
+          const ceilG = (v) => Math.ceil(v * 10) / 10;
+          const g1Val = dados.alunos.map((a) => { const v = gFinalG1(a); return v == null ? null : ceilG(v); });
+          const g2Val = dados.alunos.map((a) => { const v = gFinalG2(a); return v == null ? null : ceilG(v); });
+
+          const corpo = dados.alunos.map((a, k) => cabecalho.map((_, c) => {
+            if (c === 0) return a.matricula;
+            if (c === 1) return a.nome;
+            // procura em metaTextos/metaNumericas pela celula correspondente a esta linha (k+1)
+            const r = k + 1;
+            const tx = metaTextos.find((m) => m.r === r && m.c === c);
+            if (tx) return tx.v;
+            const nu = metaNumericas.find((m) => m.r === r && m.c === c);
+            if (nu) return fmtBR(nu.v);
+            if (c === pos.g1) return g1Val[k] == null ? "" : fmtBR(g1Val[k]);
+            if (c === pos.g2) return g2Val[k] == null ? "" : fmtBR(g2Val[k]);
+            return "";
+          }));
+
+          // Larguras: Matricula estreita, colunas de nota estreitas (so cabem 1 ou 2 digitos
+          // com virgula), cabecalhos como "TDE 1 (vale 0,75)" quebram em 2 linhas automatico.
+          // A sobra vai pra coluna Nome, pra o nome do aluno caber inteiro em 1 linha.
+          const PAGE_W = 595, MARGIN = 24;
+          const avail = PAGE_W - MARGIN * 2;
+          const wMat = 48, wTDE = 38, wAV = 46, wG = 40;
+          let usado = wMat;
+          for (let c = 2; c < cabecalho.length; c++) {
+            if (c === pos.g1 || c === pos.g2) usado += wG;
+            else if (c === pos.avG1 || c === pos.avG2) usado += wAV;
+            else usado += wTDE;
+          }
+          const wNome = Math.max(130, avail - usado);
+          const columnStyles = {
+            0: { halign: "left", cellWidth: wMat },
+            1: { halign: "left", cellWidth: wNome },
+          };
+          for (let c = 2; c < cabecalho.length; c++) {
+            const w = (c === pos.g1 || c === pos.g2) ? wG : (c === pos.avG1 || c === pos.avG2) ? wAV : wTDE;
+            columnStyles[c] = { cellWidth: w, halign: "center" };
+          }
+          doc.autoTable({
+            head: [cabecalho],
+            body: corpo,
+            startY,
+            margin: { left: MARGIN, right: MARGIN },
+            theme: "grid",
+            styles: { font: "helvetica", fontSize: 8, cellPadding: 2, overflow: "linebreak", valign: "middle", textColor: 20, lineColor: [160, 160, 160] },
+            headStyles: { fillColor: [252, 213, 181], textColor: 20, fontStyle: "normal", halign: "center", fontSize: 7.5, overflow: "linebreak", valign: "middle" },
+            columnStyles,
+            didParseCell: (data) => {
+              const c = data.column.index, r = data.row.index;
+              if (data.section === "head") {
+                if (c === pos.g1 || c === pos.g2) { data.cell.styles.fontStyle = "bold"; data.cell.styles.fontSize = 8.5; }
+                else if (c === pos.avG1 || c === pos.avG2) { data.cell.styles.fontStyle = "bold"; }
+                data.cell.styles.halign = "center";
+              } else if (data.section === "body") {
+                if (c > 1) data.cell.styles.halign = "center";
+                if (c === pos.avG1 || c === pos.avG2) data.cell.styles.fontStyle = "bold";
+                if (c === pos.g1 || c === pos.g2) {
+                  data.cell.styles.fontStyle = "bold";
+                  data.cell.styles.fontSize = 8.5;
+                  const v = c === pos.g1 ? g1Val[r] : g2Val[r];
+                  if (v != null) data.cell.styles.fillColor = v >= 6 ? [217, 225, 242] : [255, 242, 204];
+                }
+              }
+            },
+          });
+          doc.save(baseNome + ".pdf");
+        } else {
+          // ---------- XLSX ----------
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "Notas");
+          XLSX.writeFile(wb, baseNome + ".xlsx");
+        }
+        } // fim do loop por grupo
+      } catch (e) {
+        alert("Erro ao exportar: " + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      }
+    });
+  });
+}
+
+/* ---------------- Turma — detalhe (alunos + TDEs) ---------------- */
+async function renderTurmaDetalhe() {
+  const turmaId = state.turmaAtualId;
+  const [turmas, alunos, provas] = await Promise.all([
+    api("/turmas"), api(`/alunos?turmaId=${turmaId}`), api(`/provas-mestre?turmaId=${turmaId}`),
+  ]);
+  const turma = turmas.find((t) => t.id === turmaId);
+  if (!turma) { setView("turmas"); return; }
+
+  content.innerHTML = `
+    <div style="margin-bottom:6px;"><a href="#" id="voltar-turmas" class="mono muted" style="font-size:12px;">← Todas as turmas</a></div>
+    <div class="eyebrow">TURMA</div>
+    <div class="row" style="margin-bottom:20px; align-items:center;">
+      <h1 id="turma-titulo">${turma.nome}</h1>
+      <button class="btn subtle" id="btn-editar-turma" style="font-size:11px; padding:5px 10px;">Editar nome</button>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; margin-bottom:20px;">
+      <div class="card">
+        ${corners()}
+        <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:12px;">Alunos matriculados (${alunos.length})</div>
+        <div class="field">
+          <label>Adicionar alunos — cole "Matrícula, Nome", um por linha (funciona com TAB, vírgula ou ponto-e-vírgula)</label>
+          <textarea id="novos-alunos" placeholder="2023001, Ana Souza
+2023002, Bruno Carvalho"></textarea>
+        </div>
+        <div id="erro-alunos"></div>
+        <button class="btn subtle" id="btn-add-alunos">+ Adicionar</button>
+        <div class="divider">
+          ${alunos.length === 0 ? `<div class="muted" style="font-size:13px;">Nenhum aluno matriculado ainda.</div>` : ""}
+          ${alunos.map((a, i) => `
+            <div class="row" style="padding:8px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}; align-items:center; flex-wrap:wrap; gap:8px;">
+              <span style="font-size:13px; flex:1 1 220px;">${a.nome} <span class="mono muted" style="font-size:11px;">— matrícula ${a.matricula}</span></span>
+              <div style="display:flex; align-items:center; gap:6px; font-size:11px;">
+                <label style="color:var(--ink-faint);" title="Quantas das 10 questões da AV1 o aluno acertou. A nota sai de acertos × (10 - soma dos TDEs da G1) / 10.">Acertos AV1</label>
+                <input data-nota-av="acertosAV1" data-aluno="${a.id}" type="text" inputmode="decimal" value="${a.faltouAV1 ? "Faltou" : (a.acertosAV1 ?? "")}" placeholder="—" style="width:62px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Quantas das 10 questões o aluno acertou (0 a 10, aceita meios). Digite &quot;Faltou&quot; se ele não compareceu." />
+                <span style="color:var(--ink-faint); font-size:10px;">/10</span>
+                <label style="color:var(--ink-faint); margin-left:10px;" title="Nota direta da AV2 (0 a 10). Discursiva, pesos variáveis — você digita a nota final já calculada.">Nota AV2</label>
+                <input data-nota-av="notaAV2" data-aluno="${a.id}" type="number" step="0.1" min="0" max="10" value="${a.notaAV2 ?? ""}" placeholder="—" style="width:60px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G2 (0 a 10)" />
+                <span id="erro-av-${a.id}" class="mono" style="color:var(--red); font-size:10px;"></span>
+              </div>
+              <button class="btn danger" style="padding:4px 8px; font-size:11px;" data-remover-aluno="${a.id}">Remover</button>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+
+      <div class="card">
+        ${corners()}
+        <div class="row" style="margin-bottom:12px;">
+          <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase;">TDEs desta turma (${provas.length})</div>
+          <button class="btn subtle" id="btn-novo-tde" style="font-size:11px; padding:5px 10px;">+ Novo TDE</button>
+        </div>
+        ${provas.length === 0 ? `<div class="muted" style="font-size:13px;">Nenhum TDE criado ainda nesta turma.</div>` : ""}
+        <div id="lista-tdes-arrastavel">
+        ${provas.map((p, i) => `
+          <div class="tde-card" draggable="true" data-tde-id="${p.id}" style="padding:10px 10px 10px 28px; ${i>0?'border-top:1px solid var(--line-faint);':''}; position:relative; background:var(--surface);">
+            <span class="tde-grip" style="position:absolute; left:6px; top:12px; cursor:grab; color:var(--ink-faint); font-size:16px; line-height:1; user-select:none;" title="Arraste para reordenar">⋮⋮</span>
+            <div class="row">
+              <div style="font-weight:600; font-size:13.5px;">${p.titulo}</div>
+              <span class="pill ${p.status==='publicada'?'teal':''}">${p.status}</span>
+            </div>
+            <div class="row" style="margin-top:6px;">
+              <span class="muted" style="font-size:11.5px;">${p.totalQuestoes} questões · vale ${p.valor} pts · ${p.totalAlunos} alunos${p.grupoAvaliacao ? ` · <span style="color:var(--teal);">conta na ${p.grupoAvaliacao}</span>` : ""}${p.prazoFinal ? ` · prazo até ${new Date(p.prazoFinal).toLocaleDateString("pt-BR")}` : ""}</span>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <select data-grupo-avaliacao="${p.id}" style="background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:11px;" title="Em qual avaliacao este TDE conta?">
+                  <option value="" ${!p.grupoAvaliacao ? "selected" : ""}>— sem grupo —</option>
+                  <option value="G1" ${p.grupoAvaliacao === "G1" ? "selected" : ""}>G1</option>
+                  <option value="G2" ${p.grupoAvaliacao === "G2" ? "selected" : ""}>G2</option>
+                </select>
+                <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-renomear-tde="${p.id}" data-titulo-atual="${attr(p.titulo)}">Renomear</button>
+                <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-valor-tde="${p.id}" data-valor-atual="${p.valor}">Editar pontos</button>
+                <button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-editar-prazo-tde="${p.id}" data-prazo-atual="${p.prazoFinal || ""}">Editar prazo</button>
+                ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-add-alunos-tde="${p.id}">+ Alunos novos</button>` : ""}
+                ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-links-tde="${p.id}">Ver links</button>` : ""}
+                ${p.status==='publicada' ? `<button class="btn subtle" style="font-size:11px; padding:4px 8px;" data-ver-resultado-tde="${p.id}">Resultados</button>` : ""}
+                <button class="btn danger" style="font-size:11px; padding:4px 8px;" data-apagar-tde="${p.id}">Apagar</button>
+              </div>
+            </div>
+            <div id="valor-tde-${p.id}"></div>
+            <div id="prazo-tde-${p.id}"></div>
+            <div id="add-alunos-tde-${p.id}"></div>
+            <div id="links-tde-${p.id}"></div>
+          </div>
+        `).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("voltar-turmas").addEventListener("click", (e) => { e.preventDefault(); setView("turmas"); });
+  document.getElementById("btn-editar-turma").addEventListener("click", async () => {
+    const novoNome = prompt("Novo nome da turma:", turma.nome);
+    if (novoNome === null) return; // cancelou
+    if (!novoNome.trim()) { alert("O nome não pode ficar vazio."); return; }
+    try {
+      await api(`/turmas/${turmaId}`, { method: "PUT", body: JSON.stringify({ nome: novoNome.trim() }) });
+      renderTurmaDetalhe();
+    } catch (e) {
+      alert("Erro ao renomear: " + e.message);
+    }
+  });
+  document.getElementById("btn-novo-tde").addEventListener("click", () => {
+    state.selecionadas = new Set();
+    state.alunosSelecionados = new Set();
+    state.alunosSelecionadosInicializado = false;
+    state.publicarResultado = null;
+    setView("montar");
+  });
+
+  document.getElementById("btn-add-alunos").addEventListener("click", async () => {
+    const texto = document.getElementById("novos-alunos").value;
+    const erroEl = document.getElementById("erro-alunos");
+
+    const alunosColados = texto.split("\n").map((linha) => linha.trim()).filter(Boolean).map((linha) => {
+      // aceita colar do Excel (separado por TAB) ou digitado com vírgula/ponto-e-vírgula — ordem: matrícula, nome
+      const partes = linha.split(/\t|,|;/).map((p) => p.trim()).filter(Boolean);
+      return { matricula: partes[0] || "", nome: partes[1] || "" };
+    });
+
+    if (alunosColados.length === 0) { erroEl.innerHTML = `<div class="error-box">Cole ao menos uma linha com nome e matrícula.</div>`; return; }
+    if (alunosColados.some((a) => !a.nome || !a.matricula)) {
+      erroEl.innerHTML = `<div class="error-box">Cada linha precisa ter nome E matrícula, separados por vírgula (ou colados do Excel).</div>`;
+      return;
+    }
+
+    try {
+      const resultado = await api("/alunos", { method: "POST", body: JSON.stringify({ turmaId, alunos: alunosColados }) });
+      renderTurmaDetalhe();
+      if (resultado.erros && resultado.erros.length > 0) {
+        alert("Alguns alunos não foram adicionados:\n\n" + resultado.erros.join("\n"));
+      }
+    } catch (e) {
+      erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
+    }
+  });
+
+  (() => {
+    // ---- arrastar e soltar pra reordenar os TDEs ----
+    // O save roda no "dragend" (nao no "drop"), porque o drop so dispara se o usuario
+    // solta exatamente em cima de um alvo valido. Soltando em espaco em branco entre
+    // cards o drop nao fira e a nova ordem se perdia na proxima carga da pagina.
+    const lista = document.getElementById("lista-tdes-arrastavel");
+    if (!lista) return;
+    let arrastando = null;
+    let ordemInicial = [];
+    let salvando = false;
+    const cards = Array.from(lista.querySelectorAll(".tde-card"));
+    cards.forEach((card) => {
+      card.addEventListener("dragstart", (ev) => {
+        arrastando = card;
+        ordemInicial = Array.from(lista.querySelectorAll(".tde-card")).map((c) => c.dataset.tdeId);
+        card.style.opacity = "0.4";
+        try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", card.dataset.tdeId); } catch {}
+      });
+      card.addEventListener("dragover", (ev) => {
+        if (!arrastando || arrastando === card) return;
+        ev.preventDefault();
+        try { ev.dataTransfer.dropEffect = "move"; } catch {}
+        const r = card.getBoundingClientRect();
+        const antes = ev.clientY < r.top + r.height / 2;
+        if (antes) lista.insertBefore(arrastando, card);
+        else lista.insertBefore(arrastando, card.nextSibling);
+      });
+      card.addEventListener("drop", (ev) => { ev.preventDefault(); });
+      card.addEventListener("dragend", async () => {
+        card.style.opacity = "";
+        arrastando = null;
+        if (salvando) return;
+        const ids = Array.from(lista.querySelectorAll(".tde-card")).map((c) => c.dataset.tdeId);
+        if (ids.join(",") === ordemInicial.join(",")) return; // nada mudou, nao salva
+        salvando = true;
+        try {
+          await api(`/provas-mestre/reordenar`, { method: "POST", body: JSON.stringify({ turmaId, ids }) });
+          renderTurmaDetalhe();
+        } catch (e) {
+          alert("Erro ao salvar a nova ordem: " + e.message);
+          renderTurmaDetalhe();
+        } finally {
+          salvando = false;
+        }
+      });
+    });
+    // tolerancia a drop no proprio contêiner (ou qualquer canto da lista)
+    lista.addEventListener("dragover", (ev) => { if (arrastando) ev.preventDefault(); });
+  })();
+
+  content.querySelectorAll("[data-nota-av]").forEach((el) => {
+    el.dataset.prev = el.value;
+    // scroll do mouse em cima do input de numero muda o valor por padrao no Chrome;
+    // bloqueia essa mudanca e tira o foco, pra o scroll seguir pra pagina sem alterar nada.
+    el.addEventListener("wheel", (ev) => {
+      if (document.activeElement === el) { ev.preventDefault(); el.blur(); }
+    }, { passive: false });
+    el.addEventListener("change", async () => {
+      const campo = el.dataset.notaAv;
+      const alunoId = el.dataset.aluno;
+      const erroEl = document.getElementById(`erro-av-${alunoId}`);
+      erroEl.textContent = "";
+      try {
+        const bruto = el.value.trim();
+        let valor;
+        if (bruto === "") valor = null;
+        else if (campo === "acertosAV1" && /^faltou$/i.test(bruto)) {
+          valor = "Faltou"; el.value = "Faltou";
+        } else {
+          valor = Number(bruto.replace(",", "."));
+          if (!isFinite(valor)) throw new Error("Digite um número de 0 a 10, ou 'Faltou' (apenas no AV1).");
+        }
+        await api(`/alunos/${alunoId}/nota-av`, { method: "PUT", body: JSON.stringify({ campo, valor }) });
+        el.dataset.prev = el.value;
+      } catch (e) {
+        erroEl.textContent = e.message;
+        el.value = el.dataset.prev;
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-remover-aluno]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      if (!confirm("Remover este aluno da turma?")) return;
+      try {
+        await api(`/alunos/${el.dataset.removerAluno}`, { method: "DELETE", body: JSON.stringify({}) });
+        renderTurmaDetalhe();
+      } catch (e) {
+        if (e.message && e.message.toLowerCase().includes("senha")) {
+          if (!confirm("⚠ Este aluno já respondeu algum TDE. Se você apagar, todo o histórico de respostas e notas dele nesse(s) TDE(s) será perdido pra sempre. Quer continuar mesmo assim?")) return;
+          const senha = prompt("Digite a senha do professor para confirmar:");
+          if (senha === null) return;
+          try {
+            await api(`/alunos/${el.dataset.removerAluno}`, { method: "DELETE", body: JSON.stringify({ senha }) });
+            renderTurmaDetalhe();
+          } catch (e2) {
+            alert("Erro ao remover: " + e2.message);
+          }
+        } else {
+          alert("Erro ao remover: " + e.message);
+        }
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-ver-resultado-tde]").forEach((el) => {
+    el.addEventListener("click", () => setView("resultados", { provaAtualId: el.dataset.verResultadoTde }));
+  });
+
+  content.querySelectorAll("[data-grupo-avaliacao]").forEach((el) => {
+    el.addEventListener("change", async () => {
+      const prev = el.dataset.anterior || "";
+      el.dataset.anterior = el.value;
+      try {
+        await api(`/provas-mestre/${el.dataset.grupoAvaliacao}/grupo-avaliacao`, {
+          method: "PUT",
+          body: JSON.stringify({ grupoAvaliacao: el.value || null }),
+        });
+        renderTurmaDetalhe();
+      } catch (e) {
+        alert("Erro ao salvar: " + e.message);
+        el.value = prev;
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-renomear-tde]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const atual = el.dataset.tituloAtual || "";
+      const novo = prompt("Novo nome do TDE:", atual);
+      if (novo === null) return;
+      const limpo = novo.trim();
+      if (!limpo) { alert("O nome nao pode ficar vazio."); return; }
+      if (limpo === atual) return;
+      try {
+        await api(`/provas-mestre/${el.dataset.renomearTde}/titulo`, { method: "PUT", body: JSON.stringify({ titulo: limpo }) });
+        renderTurmaDetalhe();
+      } catch (e) {
+        alert("Erro ao renomear: " + e.message);
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-editar-valor-tde]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const provaId = el.dataset.editarValorTde;
+      const valorAtual = el.dataset.valorAtual;
+      const alvo = document.getElementById(`valor-tde-${provaId}`);
+      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+
+      alvo.innerHTML = `
+        <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label class="mono muted" style="font-size:11px;">Vale quantos pontos:</label>
+          <input type="number" step="0.01" min="0.01" id="input-valor-${provaId}" value="${valorAtual}" style="background:var(--surface); border:1px solid var(--line); color:var(--ink); padding:5px 8px; font-size:12px; width:100px;" />
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-salvar-valor="${provaId}">Salvar</button>
+          <span class="muted" style="font-size:11px; width:100%;">As notas de quem já respondeu são recalculadas automaticamente — nenhuma resposta é alterada.</span>
+          <span id="erro-valor-${provaId}" style="width:100%;"></span>
+        </div>
+      `;
+
+      document.querySelector(`[data-salvar-valor="${provaId}"]`).addEventListener("click", async (ev) => {
+        const valor = document.getElementById(`input-valor-${provaId}`).value;
+        const erroEl = document.getElementById(`erro-valor-${provaId}`);
+        erroEl.innerHTML = "";
+        if (!valor || Number(valor) <= 0) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">Informe um valor maior que zero.</div>`;
+          return;
+        }
+        ev.target.disabled = true;
+        try {
+          await api(`/provas-mestre/${provaId}/valor`, { method: "PUT", body: JSON.stringify({ valor: Number(valor) }) });
+          renderTurmaDetalhe();
+        } catch (e) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+          ev.target.disabled = false;
+        }
+      });
+    });
+  });
+
+  content.querySelectorAll("[data-editar-prazo-tde]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const provaId = el.dataset.editarPrazoTde;
+      const prazoAtual = el.dataset.prazoAtual; // "" ou ISO string
+      const alvo = document.getElementById(`prazo-tde-${provaId}`);
+      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+
+      const valorInputData = prazoAtual ? prazoAtual.slice(0, 10) : ""; // YYYY-MM-DD pro <input type="date">
+      alvo.innerHTML = `
+        <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label class="mono muted" style="font-size:11px;">Novo prazo:</label>
+          <input type="date" id="input-prazo-${provaId}" value="${valorInputData}" style="background:var(--surface); border:1px solid var(--line); color:var(--ink); padding:5px 8px; font-size:12px;" />
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-salvar-prazo="${provaId}">Salvar</button>
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-limpar-prazo="${provaId}">Remover prazo (sem data limite)</button>
+          <span id="erro-prazo-${provaId}" style="width:100%;"></span>
+        </div>
+      `;
+
+      document.querySelector(`[data-salvar-prazo="${provaId}"]`).addEventListener("click", async () => {
+        const dataStr = document.getElementById(`input-prazo-${provaId}`).value; // "" ou "YYYY-MM-DD"
+        const erroEl = document.getElementById(`erro-prazo-${provaId}`);
+        if (!dataStr) { erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">Escolha uma data, ou clique em "Remover prazo".</div>`; return; }
+        const prazoFinal = new Date(dataStr + "T23:59:59").toISOString();
+        try {
+          await api(`/provas-mestre/${provaId}/prazo`, { method: "PUT", body: JSON.stringify({ prazoFinal }) });
+          renderTurmaDetalhe();
+        } catch (e) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+        }
+      });
+
+      document.querySelector(`[data-limpar-prazo="${provaId}"]`).addEventListener("click", async () => {
+        try {
+          await api(`/provas-mestre/${provaId}/prazo`, { method: "PUT", body: JSON.stringify({ prazoFinal: null }) });
+          renderTurmaDetalhe();
+        } catch (e) {
+          document.getElementById(`erro-prazo-${provaId}`).innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+        }
+      });
+    });
+  });
+
+  content.querySelectorAll("[data-add-alunos-tde]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const provaId = el.dataset.addAlunosTde;
+      const alvo = document.getElementById(`add-alunos-tde-${provaId}`);
+      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+      alvo.innerHTML = `<div class="muted mono" style="font-size:11px; padding:8px 0;">Carregando…</div>`;
+      try {
+        const links = await api(`/provas-mestre/${provaId}/links`);
+        const idsComProva = new Set(links.map((l) => l.alunoId));
+        const faltando = alunos.filter((a) => !idsComProva.has(a.id));
+
+        if (faltando.length === 0) {
+          alvo.innerHTML = `<div class="ok-box" style="margin-top:8px;">Todos os alunos da turma já têm prova gerada neste TDE.</div>`;
+          return;
+        }
+
+        alvo.innerHTML = `
+          <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint);">
+            <div class="mono muted" style="font-size:10.5px; margin-bottom:8px; text-transform:uppercase;">Alunos da turma que ainda não têm prova neste TDE (${faltando.length})</div>
+            ${faltando.map((a) => `
+              <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="chk-add-aluno" value="${a.id}" checked style="width:auto;" /> ${a.nome}
+              </label>
+            `).join("")}
+            <div id="erro-add-alunos" style="margin-top:6px;"></div>
+            <button class="btn" id="btn-confirmar-add-alunos" style="margin-top:10px; font-size:12px; padding:6px 12px;">Gerar prova pra selecionados</button>
+          </div>
+        `;
+
+        document.getElementById("btn-confirmar-add-alunos").addEventListener("click", async (ev) => {
+          const selecionados = Array.from(document.querySelectorAll(".chk-add-aluno:checked")).map((c) => c.value);
+          const erroEl = document.getElementById("erro-add-alunos");
+          if (selecionados.length === 0) { erroEl.innerHTML = `<div class="error-box">Selecione ao menos um aluno.</div>`; return; }
+          ev.target.disabled = true;
+          ev.target.textContent = "Gerando…";
+          try {
+            await api(`/provas-mestre/${provaId}/adicionar-alunos`, { method: "POST", body: JSON.stringify({ alunoIds: selecionados }) });
+            alvo.innerHTML = "";
+            renderTurmaDetalhe();
+          } catch (e) {
+            erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
+            ev.target.disabled = false;
+            ev.target.textContent = "Gerar prova pra selecionados";
+          }
+        });
+      } catch (e) {
+        alvo.innerHTML = `<div class="error-box" style="margin-top:8px;">Erro ao carregar: ${e.message}</div>`;
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-ver-links-tde]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const provaId = el.dataset.verLinksTde;
+      const alvo = document.getElementById(`links-tde-${provaId}`);
+      if (alvo.innerHTML) { alvo.innerHTML = ""; return; } // clique de novo fecha
+      alvo.innerHTML = `<div class="muted mono" style="font-size:11px; padding:8px 0;">Carregando…</div>`;
+      try {
+        const links = await api(`/provas-mestre/${provaId}/links`);
+        const linkTurma = `${window.location.origin}/aluno.html?prova=${provaId}`;
+        alvo.innerHTML = `
+          <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint);">
+            <div class="mono muted" style="font-size:10.5px; margin-bottom:6px; text-transform:uppercase;">Link pra passar pra turma inteira (poste uma vez no Classroom/quadro)</div>
+            <div class="row" style="margin-bottom:12px; gap:8px;">
+              <input readonly value="${linkTurma}" class="mono" style="flex:1; padding:6px 8px; font-size:11.5px; background:var(--surface); border:1px solid var(--line); color:var(--teal);" onclick="this.select()" />
+              <button class="btn subtle" style="padding:6px 10px; font-size:11px;" data-copiar-link="${linkTurma}">Copiar</button>
+            </div>
+            <div class="mono muted" style="font-size:10.5px; margin-bottom:8px;">Cada aluno digita a própria matrícula pra entrar. Referência (matrícula = código):</div>
+            ${links.map((l) => `
+              <div class="row" style="padding:5px 0;">
+                <span style="font-size:12px;">${l.alunoNome}</span>
+                <span class="mono" style="font-size:13px; color:var(--teal); letter-spacing:.05em;">${l.qrToken}</span>
+              </div>
+            `).join("")}
+          </div>
+        `;
+        document.querySelector(`[data-copiar-link="${linkTurma}"]`)?.addEventListener("click", (ev) => {
+          navigator.clipboard.writeText(linkTurma);
+          ev.target.textContent = "Copiado!";
+          setTimeout(() => { ev.target.textContent = "Copiar"; }, 1500);
+        });
+      } catch (e) {
+        alvo.innerHTML = `<div class="error-box" style="margin-top:8px;">Erro ao carregar links: ${e.message}</div>`;
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-apagar-tde]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      if (!confirm("Apagar este TDE? Isso também apaga todas as provas individuais e respostas geradas a partir dele. Não tem como desfazer.")) return;
+      try {
+        await api(`/provas-mestre/${el.dataset.apagarTde}`, { method: "DELETE" });
+        renderTurmaDetalhe();
+      } catch (e) {
+        alert("Erro ao apagar: " + e.message);
+      }
+    });
+  });
+}
+
+/* ---------------- Banco de Questões ---------------- */
+async function renderBanco(mostrarForm) {
+  const questoes = await api("/questoes");
+  state.questoes = questoes;
+  const filtradas = aplicarFiltro(questoes, state.filtroBanco);
+
+  content.innerHTML = `
+    <div class="row" style="align-items:flex-start; margin-bottom:16px;">
+      <div><div class="eyebrow">BANCO DE QUESTÕES</div><h1 style="margin-bottom:0;">${questoes.length} questões cadastradas</h1></div>
+      <button class="btn subtle" id="btn-nova-questao">${mostrarForm ? "Cancelar" : "+ Nova questão"}</button>
+    </div>
+    ${mostrarForm ? `<div id="form-questao" style="margin-bottom:18px;"></div>` : ""}
+    ${renderBarraFiltro("banco", questoes, state.filtroBanco)}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start;">
+      <div>
+        <div class="mono muted" style="font-size:11px; margin-bottom:8px;">${filtradas.length} de ${questoes.length} questões</div>
+        ${(() => {
+          const lista = blocosDe(filtradas, questoes);
+          const cores = coresDosBlocos(lista);
+          return lista.map((b) => {
+          const cartao = (q, dentro) => `
+          <div class="card" style="margin-bottom:10px; cursor:pointer; ${dentro ? "background:var(--surface-raised);" : ""}" data-questao="${q.id}">
+            ${corners()}
+            <div class="row">
+              <div>
+                ${dentro ? "" : `<span class="pill" style="margin-bottom:6px;">${q.disciplina}</span>`}
+                <div style="font-weight:600; font-size:13.5px; margin-top:${dentro ? "0" : "6px"};">${dentro ? rotuloRespostas(q) : q.assunto}</div>
+              </div>
+              <div class="dots">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
+            </div>
+            <div class="mono muted" style="font-size:11.5px; margin-top:8px; line-height:1.6;">${formatarEnunciado(q.preview.enunciado)}</div>
+          </div>`;
+          if (!b.grupo) return cartao(b.questoes[0], false);
+          return molduraBloco(b, false, b.questoes.map((q) => cartao(q, true)).join(""), false, cores.get(b.grupo), true);
+          }).join("");
+        })()}
+        ${filtradas.length === 0 ? `<div class="card muted" style="text-align:center; padding:30px; font-size:13px;">${corners()}Nenhuma questão encontrada com esse filtro.</div>` : ""}
+      </div>
+      <div id="preview-pane" style="position:sticky; top:14px; align-self:start; max-height:calc(100vh - 28px); overflow-y:auto;">
+        <div class="card muted" style="text-align:center; padding:40px; font-size:13px;">
+          ${corners()}
+          Clique em uma questão para ver a parametrização
+        </div>
+      </div>
+    </div>
+  `;
+
+  ligarBarraFiltro("banco", state.filtroBanco, () => renderBanco(false));
+
+  document.getElementById("btn-nova-questao").addEventListener("click", () => {
+    state.editandoQuestaoId = null;
+    state.editandoQuestaoDados = null;
+    state.novaQuestaoVars = [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }];
+    state.novaQuestaoEtapas = [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true, notacaoCientifica: false }];
+    state.novaQuestaoImagem = null;
+    renderBanco(!mostrarForm);
+  });
+  if (mostrarForm) renderFormNovaQuestao(document.getElementById("form-questao"));
+
+  content.querySelectorAll("[data-apagar-bloco]").forEach((el) => {
+    el.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const grupo = el.dataset.apagarBloco;
+      if (!confirm(`Apagar o bloco "${grupo}" inteiro (${el.dataset.qtd} questões)?\n\nIsso não pode ser desfeito.`)) return;
+      el.disabled = true;
+      el.textContent = "Apagando…";
+      try {
+        await api(`/questoes/bloco/${encodeURIComponent(grupo)}`, { method: "DELETE" });
+        renderBanco(false);
+      } catch (e) {
+        alert("Erro ao apagar o bloco: " + e.message);
+        el.disabled = false;
+        el.textContent = "Apagar bloco";
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-questao]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const q = questoes.find((x) => x.id === el.dataset.questao);
+      const figura = figuraDe(q, questoes);
+      document.getElementById("preview-pane").innerHTML = `
+        <div class="card accent-amber">
+          ${corners()}
+          <span class="pill amber">Preview parametrizado</span>
+          <div class="mono muted" style="font-size:11px; margin-top:12px;">${q.disciplina}</div>
+          <div style="font-weight:600; font-size:15px; margin-top:2px;">${q.assunto}</div>
+          ${figura ? `<img src="${figura}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-top:10px; border:1px solid var(--line-faint);" />${q.imagem ? "" : `<div class="mono" style="font-size:10.5px; color:var(--amber); margin-top:4px;">figura herdada do bloco ${q.grupoVariaveis}</div>`}` : ""}
+          <div style="font-size:13.5px; margin-top:10px; line-height:1.6;">${formatarEnunciado(q.preview.enunciado)}</div>
+          ${q.preview.erro
+            ? `<div class="mono" style="color:var(--red); font-size:12px; margin-top:10px;">Erro: ${q.preview.erro}</div>`
+            : `<div style="margin-top:12px;">${renderAlternativasPreview(q.preview.alternativas, q.formatoResposta)}</div>`}
+          <div class="divider mono muted" style="font-size:11px;">Cada aluno recebe outros valores dentro das mesmas faixas — mesmo raciocínio, mesma dificuldade.</div>
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button class="btn subtle" data-editar="${q.id}">Editar questão</button>
+            <button class="btn subtle" data-duplicar="${q.id}">Duplicar</button>
+            <button class="btn danger" data-remover="${q.id}">Remover questão</button>
+          </div>
+        </div>
+      `;
+      document.querySelector("[data-editar]")?.addEventListener("click", () => {
+        state.editandoQuestaoId = q.id;
+        state.editandoQuestaoDados = { disciplina: q.disciplina, assunto: q.assunto, dificuldade: q.dificuldade, enunciado: q.enunciado, formatoResposta: q.formatoResposta, grupoVariaveis: q.grupoVariaveis };
+        state.novaQuestaoVars = JSON.parse(JSON.stringify(q.variaveis));
+        state.novaQuestaoEtapas = JSON.parse(JSON.stringify(q.etapas));
+        state.novaQuestaoImagem = q.imagem || null;
+        renderBanco(true);
+      });
+      // Duplicar: abre o formulário já preenchido com esta questão, porém como questão NOVA.
+      // Serve pra encadear questões sobre a mesma peça sem redigitar as variáveis uma a uma —
+      // basta ajustar o enunciado e as etapas de cálculo e salvar.
+      document.querySelector("[data-duplicar]")?.addEventListener("click", () => {
+        state.editandoQuestaoId = null; // null = salvar cria uma questão nova, não sobrescreve esta
+        state.editandoQuestaoDados = {
+          disciplina: q.disciplina,
+          assunto: q.assunto,
+          dificuldade: q.dificuldade,
+          enunciado: q.enunciado,
+          formatoResposta: q.formatoResposta,
+          grupoVariaveis: q.grupoVariaveis,
+        };
+        state.novaQuestaoVars = JSON.parse(JSON.stringify(q.variaveis));
+        state.novaQuestaoEtapas = JSON.parse(JSON.stringify(q.etapas));
+        state.novaQuestaoImagem = q.imagem || null;
+        renderBanco(true);
+      });
+      document.querySelector("[data-remover]")?.addEventListener("click", async () => {
+        if (!confirm("Remover esta questão do banco?")) return;
+        try {
+          await api(`/questoes/${q.id}`, { method: "DELETE" });
+          renderBanco(false);
+        } catch (e) {
+          alert("Erro ao remover: " + e.message);
+        }
+      });
+    });
+  });
+}
+
+// monta o texto de uma alternativa combinando todos os campos (ex.: "I=29947.5 cm⁴, σ=0.145 kN/cm²")
+// se "formato" for informado (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele pra montar uma expressão única
+// SÓ pros campos que ele realmente referencia — outros campos marcados como "é resposta" que não
+// aparecem no formato continuam sendo mostrados do jeito padrão, do lado.
+// comFormatacao=true converte **negrito**, ^{sup} e _{sub} pra HTML; use false pro PDF, que não entende HTML.
+function textoAlternativa(campos, formato, comFormatacao = true) {
+  const fmt = (t) => (comFormatacao ? formatarInline(t) : limparMarcacoes(t));
+  if (formato) {
+    let out = formato;
+    const usados = new Set();
+    campos.forEach((c) => {
+      if (out.includes(`{${c.nome}}`)) {
+        out = out.split(`{${c.nome}}`).join(formatarValorCampo(c.valor, c));
+        usados.add(c.nome);
+      }
+    });
+    out = fmt(out);
+    const restantes = campos.filter((c) => !usados.has(c.nome));
+    const textoRestante = restantes.map((c) => `${fmt(c.nome)} = ${fmt(formatarValorCampo(c.valor, c))} ${fmt(c.unidade)}`).join("   |   ");
+    return textoRestante ? `${out}   |   ${textoRestante}` : out;
+  }
+  return campos.map((c) => `${fmt(c.nome)} = ${fmt(formatarValorCampo(c.valor, c))} ${fmt(c.unidade)}`).join("   |   ");
+}
+
+function renderAlternativasPreview(alternativas, formato) {
+  return `<div style="display:flex; flex-direction:column; gap:6px;">
+    ${alternativas.map((a) => `
+      <div class="mono" style="font-size:12px; padding:6px 8px; ${a.correta ? 'background:rgba(127,216,143,.1); color:var(--green); border:1px solid #3E6B45;' : 'color:var(--ink-muted); border:1px solid var(--line-faint);'}">
+        ${a.letra}) ${textoAlternativa(a.campos, formato)} ${a.correta ? "← correta" : ""}
+      </div>
+    `).join("")}
+  </div>`;
+}
+
+function renderFormNovaQuestao(container) {
+  const editando = !!state.editandoQuestaoId;
+  const dados = state.editandoQuestaoDados || { disciplina: "", assunto: "", dificuldade: 2, enunciado: "", formatoResposta: "", grupoVariaveis: "" };
+  const disciplinasExistentes = disciplinasDe(state.questoes || []);
+  const assuntosExistentes = assuntosDe(state.questoes || [], "");
+  container.innerHTML = `
+    <div class="card accent-teal">
+      ${corners()}
+      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px;">${editando ? "Editar questão" : (state.editandoQuestaoDados ? "Nova questão (cópia)" : "Nova questão parametrizada")}</div>
+      ${!editando && state.editandoQuestaoDados ? `<div class="hint" style="margin:-8px 0 14px;">Cópia carregada: variáveis, etapas e imagem vieram da questão original. Ajuste o que precisar — ao salvar, uma questão NOVA será criada e a original continua intacta.</div>` : ""}
+      <div id="erro-questao"></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="field">
+          <label>Disciplina</label>
+          <input id="nq-disciplina" value="${dados.disciplina}" placeholder="Ex: Resistência dos Materiais" list="lista-disciplinas" />
+          <datalist id="lista-disciplinas">${disciplinasExistentes.map((d) => `<option value="${d}">`).join("")}</datalist>
+        </div>
+        <div class="field">
+          <label>Assunto</label>
+          <input id="nq-assunto" value="${dados.assunto}" placeholder="Ex: Flexão" list="lista-assuntos" />
+          <datalist id="lista-assuntos">${assuntosExistentes.map((a) => `<option value="${a}">`).join("")}</datalist>
+        </div>
+      </div>
+      <div class="field"><label>Dificuldade (1 a 5)</label><input id="nq-dificuldade" type="number" min="1" max="5" value="${dados.dificuldade}" class="mono" style="max-width:120px;" /></div>
+      <div class="field">
+        <label>Enunciado (use {NOME} para referenciar qualquer variável OU etapa)</label>
+        <textarea id="nq-enunciado" placeholder="Ex: Uma viga retangular tem base {b} cm e altura {h} cm...">${dados.enunciado}</textarea>
+        <div class="hint" style="margin-top:-8px; margin-bottom:14px;">
+          As <b>quebras de linha</b> que você digitar são mantidas. Para negrito, expoente ou índice, selecione o trecho e use os botões abaixo
+          (ou escreva à mão: <code>**negrito**</code>, <code>^{2}</code>, <code>_{BC}</code>).
+        </div>
+      </div>
+      <div class="field">
+        <label>Imagem / esquema (opcional — diagrama, desenho da viga, circuito, etc.)</label>
+        <input type="file" id="nq-imagem" accept="image/*" />
+        <div id="nq-imagem-preview" style="margin-top:8px;"></div>
+        <div class="hint">Se esta questão fizer parte de um bloco, basta subir a figura em <b>uma</b> delas — as outras usam a mesma automaticamente. Não suba 14 vezes: cada cópia vira um base64 inteiro no banco.</div>
+      </div>
+      <div class="field">
+        <label>Formatação — selecione um trecho do enunciado e clique no botão</label>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
+          <button type="button" class="btn subtle" data-formatar="negrito" style="padding:6px 14px; font-weight:700;" title="Negrito">N</button>
+          <button type="button" class="btn subtle" data-formatar="sobrescrito" style="padding:6px 14px;" title="Sobrescrito (expoente), ex.: mm²">x<sup>2</sup> ↑</button>
+          <button type="button" class="btn subtle" data-formatar="subscrito" style="padding:6px 14px;" title="Subscrito (índice), ex.: φBC">x<sub>2</sub> ↓</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Letras gregas e símbolos (î, ĵ, k̂, °, ±...) — clique num campo de texto abaixo e depois no símbolo pra inserir</label>
+        <div id="paleta-grega" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
+      </div>
+
+      <div class="field">
+        <label>Variáveis de entrada (sorteadas aleatoriamente pra cada aluno)</label>
+        <div id="nq-vars"></div>
+        <button class="btn subtle" id="nq-add-var" type="button">+ Adicionar variável</button>
+      </div>
+
+      <div class="field">
+        <label>Etapas de cálculo (em ordem — cada uma pode usar as variáveis acima E o resultado de etapas anteriores)</label>
+        <div class="hint" style="margin-bottom:4px;">Marque "é resposta" nas etapas que devem aparecer nas alternativas pro aluno responder. Pode marcar mais de uma (ex.: I e σ na mesma questão).</div>
+        <div class="hint" style="margin-bottom:8px;">
+          Fórmulas aceitam: <code>+ - * / ^</code>, funções <code>sin cos tan sqrt abs ln log</code> (ângulos em graus),
+          <code>atan2(y;x)</code> (ângulo já certo em qualquer quadrante), <code>min(a;b)</code>, <code>max(a;b)</code>,
+          e condição <code>se(condição;se_verdadeiro;se_falso)</code> — ex.: <code>se(x>0;x;-x)</code>.
+          Separe argumentos de função com <b>ponto-e-vírgula</b> (;), não vírgula — a vírgula já é o separador decimal.<br>
+          O <code>se()</code> também pode devolver <b>texto</b> entre aspas, ex.: <code>se(Rx>=0;se(Ry>=0;"1º quadrante";"4º quadrante");se(Ry>=0;"2º quadrante";"3º quadrante"))</code>
+          — o texto sempre fica coerente com os números daquela alternativa, mesmo nas erradas.
+        </div>
+        <div id="nq-etapas"></div>
+        <button class="btn subtle" id="nq-add-etapa" type="button">+ Adicionar etapa</button>
+      </div>
+
+      <div class="field">
+        <label>Formato customizado da resposta (opcional — pra vetores, notação especial, etc.)</label>
+        <input id="nq-formato-resposta" value="${attr(dados.formatoResposta || "")}" placeholder="Ex: F = ({Fx}î + {Fz}k̂) N" class="mono" />
+        <div class="hint">Use {NOME} pra referenciar o valor de uma etapa marcada como "é resposta". Se deixar vazio, mostra do jeito padrão: "Fx = 5 N | Fz = 3 N".</div>
+      </div>
+
+      <div class="field">
+        <label>Grupo de variáveis (opcional — pra encadear questões sobre a mesma peça)</label>
+        <input id="nq-grupo" value="${attr(dados.grupoVariaveis || "")}" placeholder="Ex: figura-ancora" class="mono" />
+        ${(() => {
+          const g = dados.grupoVariaveis;
+          if (!g || state.novaQuestaoImagem) return "";
+          const dona = (state.questoes || []).find((o) => o.grupoVariaveis === g && o.imagem);
+          return dona
+            ? `<div class="hint" style="color:var(--amber);">Esta questão vai usar a figura já enviada no bloco <b>${g}</b>. Deixe o campo de imagem vazio.</div>`
+            : `<div class="hint" style="color:var(--amber);">Nenhuma questão do bloco <b>${g}</b> tem figura ainda. Suba a figura aqui e as outras herdam.</div>`;
+        })()}
+        <div class="hint">Questões com o MESMO grupo, dentro de um mesmo TDE, recebem os mesmos valores sorteados nas variáveis de mesmo nome — então falam da mesma peça. Útil quando a 2ª questão precisa do resultado da 1ª. Elas também ficam sempre juntas e na ordem definida, mesmo no modo aleatório. Deixe vazio para a questão ser independente.</div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn subtle" id="nq-testar" type="button">Testar</button>
+        <button class="btn" id="nq-salvar" type="button">${editando ? "Salvar alterações" : "Salvar questão"}</button>
+      </div>
+      <div id="nq-preview" style="margin-top:12px;"></div>
+    </div>
+  `;
+
+  let campoAtivo = document.getElementById("nq-enunciado");
+  container.addEventListener("focusin", (e) => {
+    if (e.target.matches("input, textarea")) campoAtivo = e.target;
+  });
+
+  function renderImagemPreview() {
+    const el = document.getElementById("nq-imagem-preview");
+    if (!state.novaQuestaoImagem) { el.innerHTML = ""; return; }
+    el.innerHTML = `
+      <div style="position:relative; display:inline-block;">
+        <img src="${state.novaQuestaoImagem}" style="max-width:220px; max-height:160px; border:1px solid var(--line); display:block;" />
+        <button type="button" id="nq-remover-imagem" class="btn danger" style="margin-top:6px; padding:4px 8px; font-size:11px;">Remover imagem</button>
+      </div>
+    `;
+    document.getElementById("nq-remover-imagem").addEventListener("click", () => {
+      state.novaQuestaoImagem = null;
+      document.getElementById("nq-imagem").value = "";
+      renderImagemPreview();
+    });
+  }
+  renderImagemPreview();
+
+  document.getElementById("nq-imagem").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        // reduz pra no máximo 1000px de largura e comprime em JPEG, pra não pesar no banco
+        const maxW = 1000;
+        const escala = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width * escala;
+        canvas.height = img.height * escala;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        state.novaQuestaoImagem = canvas.toDataURL("image/jpeg", 0.82);
+        renderImagemPreview();
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const LETRAS_GREGAS = ["α","β","γ","δ","ε","ζ","η","θ","ι","κ","λ","μ","ν","ξ","ο","π","ρ","σ","τ","υ","φ","χ","ψ","ω","Δ","Σ","Ω","Φ","Ψ","Θ","Λ","Π","î","ĵ","k̂","°","±","√","∞","²","³"];
+  document.getElementById("paleta-grega").innerHTML = LETRAS_GREGAS.map((l) =>
+    `<button type="button" class="btn subtle" data-letra-grega="${l}" style="padding:5px 10px; font-size:14px; font-family:var(--f-mono);">${l}</button>`
+  ).join("");
+  document.querySelectorAll("[data-letra-grega]").forEach((btn) => {
+    btn.addEventListener("mousedown", (e) => e.preventDefault()); // mantém o foco/cursor no campo de texto
+    btn.addEventListener("click", () => {
+      const el = campoAtivo;
+      if (!el) return;
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? el.value.length;
+      const ch = btn.dataset.letraGrega;
+      el.value = el.value.slice(0, start) + ch + el.value.slice(end);
+      el.selectionStart = el.selectionEnd = start + ch.length;
+      el.dispatchEvent(new Event("input", { bubbles: true })); // sem isso, o valor não era salvo (ficava só na tela)
+      el.focus();
+    });
+  });
+
+  // botões de formatação estilo Word: envolvem o trecho selecionado com a marcação correspondente.
+  // se nada estiver selecionado, insere a marcação vazia e deixa o cursor no meio, pronto pra digitar.
+  const MARCACOES = {
+    negrito:     { antes: "**",  depois: "**" },
+    sobrescrito: { antes: "^{",  depois: "}" },
+    subscrito:   { antes: "_{",  depois: "}" },
+  };
+  document.querySelectorAll("[data-formatar]").forEach((btn) => {
+    // impede que o clique tire o foco do campo — sem isso, a seleção some antes do clique ser processado
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => {
+      const el = campoAtivo || document.getElementById("nq-enunciado");
+      if (!el) return;
+
+      // não deixa formatar dentro de um campo de fórmula: ali "^" já é potência e "_" faz parte
+      // do nome da variável, então a marcação quebraria o cálculo
+      if (el.dataset && el.dataset.ecampo === "formula") {
+        alert("A formatação não se aplica ao campo de fórmula (ali o ^ já significa potência).\n\nUse nos campos de enunciado, nome da etapa, unidade ou no formato customizado da resposta.");
+        return;
+      }
+
+      const { antes, depois } = MARCACOES[btn.dataset.formatar];
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? el.value.length;
+      const selecionado = el.value.slice(start, end);
+
+      el.value = el.value.slice(0, start) + antes + selecionado + depois + el.value.slice(end);
+      if (selecionado) {
+        // mantém o trecho selecionado, agora já formatado
+        el.selectionStart = start + antes.length;
+        el.selectionEnd = start + antes.length + selecionado.length;
+      } else {
+        // nada selecionado: deixa o cursor entre as marcações pra digitar direto
+        el.selectionStart = el.selectionEnd = start + antes.length;
+      }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.focus();
+    });
+  });
+
+  function renderVarRows() {
+    document.getElementById("nq-vars").innerHTML = state.novaQuestaoVars.map((v, i) => `
+      <div class="var-row">
+        <input placeholder="nome (ex: F)" value="${v.nome}" data-vi="${i}" data-campo="nome" class="mono" />
+        <input placeholder="min" type="number" value="${v.min}" data-vi="${i}" data-campo="min" class="mono" />
+        <input placeholder="max" type="number" value="${v.max}" data-vi="${i}" data-campo="max" class="mono" />
+        <input placeholder="decimais" type="number" value="${v.decimais}" data-vi="${i}" data-campo="decimais" class="mono" />
+        <button class="btn danger" style="padding:5px 8px;" data-remove-var="${i}" type="button">×</button>
+      </div>
+    `).join("");
+    document.querySelectorAll("[data-vi]").forEach((el) => {
+      el.addEventListener("focusin", () => { campoAtivo = el; });
+      el.addEventListener("input", () => {
+        const i = Number(el.dataset.vi), campo = el.dataset.campo;
+        state.novaQuestaoVars[i][campo] = campo === "nome" ? el.value.trim() : Number(el.value);
+      });
+    });
+    document.querySelectorAll("[data-remove-var]").forEach((el) => {
+      el.addEventListener("click", () => {
+        state.novaQuestaoVars.splice(Number(el.dataset.removeVar), 1);
+        renderVarRows();
+      });
+    });
+  }
+  renderVarRows();
+
+  document.getElementById("nq-add-var").addEventListener("click", () => {
+    state.novaQuestaoVars.push({ nome: "", min: 0, max: 10, decimais: 0 });
+    renderVarRows();
+  });
+
+  function renderEtapaRows() {
+    document.getElementById("nq-etapas").innerHTML = state.novaQuestaoEtapas.map((et, i) => `
+      <div class="etapa-block">
+        <div class="etapa-row1">
+          <input placeholder="nome do resultado (ex: I)" value="${et.nome}" data-ei="${i}" data-ecampo="nome" class="mono" style="width:140px;" />
+          <textarea placeholder="fórmula (ex: (b*h*h*h)/12 — pode arrastar o canto pra aumentar)" data-ei="${i}" data-ecampo="formula" class="mono" rows="1" style="flex:1; min-height:38px; resize:vertical;">${et.formula}</textarea>
+          <button class="btn danger" style="padding:5px 8px;" data-remove-etapa="${i}" type="button">×</button>
+        </div>
+        <div class="etapa-row2">
+          <label class="mono muted" style="font-size:11px;">decimais <input type="number" value="${et.decimais}" data-ei="${i}" data-ecampo="decimais" class="mono" style="width:50px; margin-left:4px;" /></label>
+          <label class="mono muted" style="font-size:11px;">unidade <input value="${et.unidade}" data-ei="${i}" data-ecampo="unidade" class="mono" style="width:110px; margin-left:4px;" title="Aceita formatação: mm^{2} vira mm², kN_{x} vira kN com x embaixo" /></label>
+          <label style="font-size:11.5px; display:flex; align-items:center; gap:5px;">
+            <input type="checkbox" ${et.saida ? "checked" : ""} data-ei="${i}" data-ecampo="saida" style="width:auto;" /> é resposta (aparece nas alternativas)
+          </label>
+          <label style="font-size:11.5px; display:flex; align-items:center; gap:5px;" title="Exibe o resultado como 1,84 × 10³ em vez de 1840">
+            <input type="checkbox" ${et.notacaoCientifica ? "checked" : ""} data-ei="${i}" data-ecampo="notacaoCientifica" style="width:auto;" /> notação científica
+          </label>
+        </div>
+      </div>
+    `).join("");
+    document.querySelectorAll("[data-ei]").forEach((el) => {
+      el.addEventListener("focusin", () => { campoAtivo = el; });
+      el.addEventListener("input", () => {
+        const i = Number(el.dataset.ei), campo = el.dataset.ecampo;
+        if (campo === "saida" || campo === "notacaoCientifica") state.novaQuestaoEtapas[i][campo] = el.checked;
+        else if (campo === "decimais") state.novaQuestaoEtapas[i][campo] = Number(el.value);
+        else state.novaQuestaoEtapas[i][campo] = el.value;
+      });
+    });
+    document.querySelectorAll("[data-remove-etapa]").forEach((el) => {
+      el.addEventListener("click", () => {
+        state.novaQuestaoEtapas.splice(Number(el.dataset.removeEtapa), 1);
+        renderEtapaRows();
+      });
+    });
+  }
+  renderEtapaRows();
+
+  document.getElementById("nq-add-etapa").addEventListener("click", () => {
+    state.novaQuestaoEtapas.push({ nome: "", formula: "", decimais: 2, unidade: "", saida: true, notacaoCientifica: false });
+    renderEtapaRows();
+  });
+
+  function coletarQuestao() {
+    return {
+      disciplina: document.getElementById("nq-disciplina").value.trim(),
+      assunto: document.getElementById("nq-assunto").value.trim(),
+      dificuldade: Number(document.getElementById("nq-dificuldade").value),
+      enunciado: document.getElementById("nq-enunciado").value.trim(),
+      variaveis: state.novaQuestaoVars.filter((v) => v.nome),
+      etapas: state.novaQuestaoEtapas.filter((et) => et.nome && et.formula),
+      imagem: state.novaQuestaoImagem || null,
+      formatoResposta: document.getElementById("nq-formato-resposta").value.trim() || null,
+      grupoVariaveis: document.getElementById("nq-grupo").value.trim() || null,
+    };
+  }
+
+  function validar(q) {
+    if (!q.disciplina || !q.assunto || !q.enunciado || q.variaveis.length === 0 || q.etapas.length === 0) {
+      return "Preencha disciplina, assunto, enunciado, ao menos uma variável e ao menos uma etapa.";
+    }
+    if (!q.etapas.some((et) => et.saida)) {
+      return 'Marque ao menos uma etapa como "é resposta".';
+    }
+    return null;
+  }
+
+  document.getElementById("nq-testar").addEventListener("click", async () => {
+    const q = coletarQuestao();
+    const erroEl = document.getElementById("erro-questao");
+    const previewEl = document.getElementById("nq-preview");
+    erroEl.innerHTML = "";
+    previewEl.innerHTML = "";
+    const erroValidacao = validar(q);
+    if (erroValidacao) { erroEl.innerHTML = `<div class="error-box">${erroValidacao}</div>`; return; }
+    try {
+      const resultado = await api("/questoes/testar", { method: "POST", body: JSON.stringify(q) });
+      const figuraTeste = figuraDe({ imagem: q.imagem, grupoVariaveis: q.grupoVariaveis }, state.questoes);
+      previewEl.innerHTML = `<div class="ok-box">
+        ${figuraTeste ? `<img src="${figuraTeste}" style="max-width:min(100%, 360px); max-height:260px; width:auto; height:auto; display:block; margin-bottom:10px; border:1px solid var(--line-faint);" />` : ""}
+        <div style="margin-bottom:10px;">${formatarEnunciado(resultado.enunciado)}</div>
+        ${renderAlternativasPreview(resultado.alternativas, q.formatoResposta)}
+      </div>`;
+    } catch (e) {
+      erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
+    }
+  });
+
+  document.getElementById("nq-salvar").addEventListener("click", async () => {
+    const q = coletarQuestao();
+    const erroEl = document.getElementById("erro-questao");
+    erroEl.innerHTML = "";
+    const erroValidacao = validar(q);
+    if (erroValidacao) { erroEl.innerHTML = `<div class="error-box">${erroValidacao}</div>`; return; }
+    try {
+      if (state.editandoQuestaoId) {
+        await api(`/questoes/${state.editandoQuestaoId}`, { method: "PUT", body: JSON.stringify(q) });
+      } else {
+        await api("/questoes", { method: "POST", body: JSON.stringify(q) });
+      }
+      state.editandoQuestaoId = null;
+      state.editandoQuestaoDados = null;
+      state.novaQuestaoVars = [{ nome: "", min: 0, max: 10, decimais: 0 }, { nome: "", min: 0, max: 10, decimais: 0 }];
+      state.novaQuestaoEtapas = [{ nome: "", formula: "", decimais: 2, unidade: "", saida: true, notacaoCientifica: false }];
+      state.novaQuestaoImagem = null;
+      renderBanco(false);
+    } catch (e) {
+      erroEl.innerHTML = `<div class="error-box">${e.message}</div>`;
+    }
+  });
+}
+
+/* ---------------- Novo TDE (dentro de uma turma) ---------------- */
+async function renderMontar() {
+  if (!state.turmaAtualId) { setView("turmas"); return; }
+  if (state.publicarResultado) return renderMontarSucesso();
+
+  const [turmas, questoes, alunos] = await Promise.all([
+    api("/turmas"), api("/questoes"), api(`/alunos?turmaId=${state.turmaAtualId}`),
+  ]);
+  const turma = turmas.find((t) => t.id === state.turmaAtualId);
+  if (!turma) { setView("turmas"); return; }
+
+  if (!state.alunosSelecionadosInicializado) {
+    alunos.forEach((a) => state.alunosSelecionados.add(a.id));
+    state.alunosSelecionadosInicializado = true;
+  }
+
+  if (alunos.length === 0) {
+    content.innerHTML = `<div class="card muted" style="text-align:center; padding:36px; font-size:13px;">${corners()}
+      A turma <b style="color:var(--ink);">${turma.nome}</b> ainda não tem alunos matriculados.
+      <a href="#" id="link-turma" style="color:var(--teal); text-decoration:underline;">Voltar e matricular alunos</a> antes de criar um TDE.
+    </div>`;
+    document.getElementById("link-turma").addEventListener("click", (e) => { e.preventDefault(); setView("turmaDetalhe"); });
+    return;
+  }
+
+  content.innerHTML = `
+    <div style="margin-bottom:6px;"><a href="#" id="voltar-turma" class="mono muted" style="font-size:12px;">← ${turma.nome}</a></div>
+    <div class="eyebrow">NOVO TDE</div>
+    <h1 style="margin-bottom:20px;">${turma.nome}</h1>
+    <div style="display:grid; grid-template-columns:1.3fr 1fr; gap:16px; align-items:start;">
+      <div>
+        <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:10px;">Questões (${state.selecionadas.size} selecionadas de ${questoes.length} no banco)</div>
+        ${renderBarraFiltro("montar", questoes, state.filtroMontar)}
+        <div id="lista-questoes">
+          ${(() => {
+            const lista = blocosDe(aplicarFiltro(questoes, state.filtroMontar), questoes);
+            const cores = coresDosBlocos(lista);
+            return lista.map((b) => {
+              if (!b.grupo) return itemQuestaoMontar(b.questoes[0], false);
+              b.parcial = b.questoes.some((q) => state.selecionadas.has(q.id));
+              const todas = b.questoes.every((q) => state.selecionadas.has(q.id));
+              const cor = cores.get(b.grupo);
+              return molduraBloco(b, todas, b.questoes.map((q) => itemQuestaoMontar(q, true, cor)).join(""), true, cor);
+            }).join("");
+          })()}
+          ${aplicarFiltro(questoes, state.filtroMontar).length === 0 ? `<div class="card muted" style="text-align:center; padding:24px; font-size:12.5px;">${corners()}Nenhuma questão com esse filtro.</div>` : ""}
+        </div>
+
+        <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin:18px 0 10px;">Alunos (${state.alunosSelecionados.size} de ${alunos.length} selecionados)</div>
+        <div class="row" style="margin-bottom:8px;">
+          <button class="btn subtle" id="btn-marcar-todos" style="font-size:11px; padding:5px 10px;">Marcar todos</button>
+          <button class="btn subtle" id="btn-desmarcar-todos" style="font-size:11px; padding:5px 10px;">Desmarcar todos</button>
+        </div>
+        <div id="lista-alunos">
+          ${alunos.map((a) => `
+            <div class="list-item ${state.alunosSelecionados.has(a.id) ? "checked" : ""}" data-toggle-aluno="${a.id}">
+              <div class="checkbox ${state.alunosSelecionados.has(a.id) ? "on" : ""}">${state.alunosSelecionados.has(a.id) ? "✓" : ""}</div>
+              <div style="flex:1;"><div style="font-weight:600; font-size:13.5px;">${a.nome}</div></div>
+              <span class="mono muted" style="font-size:11px;">${a.matricula}</span>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+      <div class="card">
+        ${corners()}
+        <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px;">Configuração</div>
+        <div class="field">
+          <label>Título do TDE</label>
+          <input id="titulo" value="${attr(state.novoTde.titulo)}" />
+        </div>
+        <div class="field">
+          <label>Vale quantos pontos?</label>
+          <input id="valor" class="mono" type="number" step="0.1" value="${attr(state.novoTde.valor)}" />
+        </div>
+        <div class="field">
+          <label>Ordem das questões</label>
+          <div class="list-item ${state.embaralharQuestoes ? "checked" : ""}" data-ordem="aleatoria" style="margin-bottom:6px;">
+            <div class="checkbox ${state.embaralharQuestoes ? "on" : ""}">${state.embaralharQuestoes ? "✓" : ""}</div>
+            <div style="flex:1;"><div style="font-weight:600; font-size:13px;">Aleatória</div>
+              <div class="mono muted" style="font-size:11px;">cada aluno recebe numa ordem diferente</div></div>
+          </div>
+          <div class="list-item ${!state.embaralharQuestoes ? "checked" : ""}" data-ordem="fixa">
+            <div class="checkbox ${!state.embaralharQuestoes ? "on" : ""}">${!state.embaralharQuestoes ? "✓" : ""}</div>
+            <div style="flex:1;"><div style="font-weight:600; font-size:13px;">Definida por mim</div>
+              <div class="mono muted" style="font-size:11px;">na ordem em que você clicar nas questões</div></div>
+          </div>
+          <div class="hint">${state.embaralharQuestoes ? "Os valores numéricos e as alternativas continuam sorteados por aluno." : "Os números ao lado das questões mostram a ordem. Para reordenar, desmarque e marque de novo na sequência desejada."}</div>
+        </div>
+        <div class="field">
+          <label>Prazo final (opcional — até quando o aluno pode responder)</label>
+          <input id="prazo" type="date" value="${attr(state.novoTde.prazo)}" />
+          <div class="hint">Sem cronômetro — o aluno responde no tempo que quiser, até essa data. Deixe vazio pra não ter prazo.</div>
+        </div>
+        <div id="erro-publicar"></div>
+        <button class="btn subtle" id="btn-simular" style="width:100%; justify-content:center; margin-bottom:8px;" ${state.selecionadas.size === 0 ? "disabled" : ""}>
+          Simular este TDE (não salva nada)
+        </button>
+        <button class="btn" id="btn-publicar" style="width:100%; justify-content:center;" ${state.selecionadas.size === 0 || state.alunosSelecionados.size === 0 ? "disabled" : ""}>
+          Publicar e gerar ${state.alunosSelecionados.size} provas individuais
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("voltar-turma").addEventListener("click", (e) => { e.preventDefault(); setView("turmaDetalhe"); });
+  ligarBarraFiltro("montar", state.filtroMontar, () => renderMontar());
+
+  // redesenha a tela mantendo a rolagem onde estava — sem isso, cada clique numa
+  // questão jogava o professor de volta pro topo da página
+  const redesenhar = () => {
+    const y = window.scrollY;
+    renderMontar();
+    window.scrollTo(0, y);
+  };
+
+  content.querySelectorAll("[data-toggle-questao]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const id = el.dataset.toggleQuestao;
+      state.selecionadas.has(id) ? state.selecionadas.delete(id) : state.selecionadas.add(id);
+      redesenhar();
+    });
+  });
+  // clique em qualquer lugar do bloco marca/desmarca as questões encadeadas DE UMA VEZ.
+  // Elas são adicionadas na ordem do banco, então a numeração da ordem fixa sai certa.
+  content.querySelectorAll("[data-toggle-bloco]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const grupo = el.dataset.toggleBloco;
+      const doBloco = questoes.filter((q) => (q.grupoVariaveis || null) === grupo);
+      const todas = doBloco.every((q) => state.selecionadas.has(q.id));
+      doBloco.forEach((q) => (todas ? state.selecionadas.delete(q.id) : state.selecionadas.add(q.id)));
+      redesenhar();
+    });
+  });
+  content.querySelectorAll("[data-toggle-aluno]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const id = el.dataset.toggleAluno;
+      state.alunosSelecionados.has(id) ? state.alunosSelecionados.delete(id) : state.alunosSelecionados.add(id);
+      redesenhar();
+    });
+  });
+  // mantém o que foi digitado dentro do state, sem redesenhar a tela (redesenhar
+  // aqui faria o campo perder o foco a cada tecla)
+  [["titulo","titulo"],["valor","valor"],["prazo","prazo"]].forEach(([id, chave]) => {
+    const campo = document.getElementById(id);
+    if (!campo) return;
+    // "input" cobre a digitação; "change" garante o seletor de data, que em alguns
+    // navegadores só dispara change ao escolher no calendário
+    const sincronizar = () => { state.novoTde[chave] = campo.value; };
+    campo.addEventListener("input", sincronizar);
+    campo.addEventListener("change", sincronizar);
+  });
+
+  content.querySelectorAll("[data-ordem]").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.embaralharQuestoes = el.dataset.ordem === "aleatoria";
+      redesenhar();
+    });
+  });
+  document.getElementById("btn-marcar-todos").addEventListener("click", () => {
+    alunos.forEach((a) => state.alunosSelecionados.add(a.id));
+    redesenhar();
+  });
+  document.getElementById("btn-desmarcar-todos").addEventListener("click", () => {
+    state.alunosSelecionados.clear();
+    redesenhar();
+  });
+
+  // Simulação: gera uma prova exatamente como o aluno receberia, sem criar TDE nenhum.
+  document.getElementById("btn-simular").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Gerando simulação…";
+    try {
+      state.simulacao = await api("/provas-mestre/simular", {
+        method: "POST",
+        body: JSON.stringify({
+          questaoIds: Array.from(state.selecionadas),
+          embaralharQuestoes: state.embaralharQuestoes,
+          seed: "exemplo-" + Date.now(),
+        }),
+      });
+      setView("simular");
+    } catch (err) {
+      document.getElementById("erro-publicar").innerHTML = `<div class="error-box">Erro ao simular: ${err.message}</div>`;
+      e.target.disabled = false;
+      e.target.textContent = "Simular este TDE (não salva nada)";
+    }
+  });
+
+  document.getElementById("btn-publicar").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Gerando provas…";
+    const erroEl = document.getElementById("erro-publicar");
+    try {
+      const titulo = state.novoTde.titulo;
+      const valor = state.novoTde.valor;
+      const prazoStr = state.novoTde.prazo; // "" ou "YYYY-MM-DD"
+      const prazoFinal = prazoStr ? new Date(prazoStr + "T23:59:59").toISOString() : null;
+      const questaoIds = Array.from(state.selecionadas);
+      const alunoIds = Array.from(state.alunosSelecionados);
+
+      const provaMestre = await api("/provas-mestre", {
+        method: "POST",
+        body: JSON.stringify({ titulo, turmaId: state.turmaAtualId, valor, prazoFinal, questaoIds, embaralharQuestoes: state.embaralharQuestoes }),
+      });
+      const resultado = await api(`/provas-mestre/${provaMestre.id}/publicar`, {
+        method: "POST",
+        body: JSON.stringify({ alunoIds }),
+      });
+      state.provaAtualId = provaMestre.id;
+      state.publicarResultado = resultado;
+      state.selecionadas = new Set();
+      state.novoTde = { titulo: "TDE 1", valor: "10", prazo: "" }; // volta ao padrão só depois de publicar
+      render();
+    } catch (err) {
+      erroEl.innerHTML = `<div class="error-box">Erro ao publicar: ${err.message}</div>`;
+      e.target.disabled = false;
+      e.target.textContent = "Publicar e gerar provas";
+    }
+  });
+}
+
+// Tela de SIMULAÇÃO. Mostra a prova montada pelo mesmo gerador que o aluno usa, com o
+// gabarito destacado e os valores sorteados à mostra. Nada aqui foi salvo no banco:
+// é só conferência antes de publicar.
+function renderSimular() {
+  const s = state.simulacao;
+  if (!s) { setView("montar"); return; }
+  // mesmas páginas que o aluno vai ver: bloco encadeado = uma página em cascata
+  const paginas = [];
+  const indice = new Map();
+  for (const q of s.questoes) {
+    const g = q.grupo || null;
+    if (!g) { paginas.push({ grupo: null, questoes: [q] }); continue; }
+    if (!indice.has(g)) { const pg = { grupo: g, questoes: [] }; indice.set(g, pg); paginas.push(pg); }
+    indice.get(g).questoes.push(q);
+  }
+  const numero = (q) => s.questoes.indexOf(q) + 1;
+  const cores = coresDosBlocos(paginas);
+
+  content.innerHTML = `
+    <div style="margin-bottom:6px;"><a href="#" id="voltar-montar" class="mono muted" style="font-size:12px;">← voltar e ajustar o TDE</a></div>
+    <div class="eyebrow" style="color:var(--amber);">SIMULAÇÃO · NADA FOI SALVO</div>
+    <h1 style="margin-bottom:4px;">Como um aluno veria este TDE</h1>
+    <div class="mono muted" style="font-size:12px; margin-bottom:14px;">
+      ${s.questoes.length} ${s.questoes.length === 1 ? "questão" : "questões"} em ${paginas.length} ${paginas.length === 1 ? "página" : "páginas"} ·
+      ${state.embaralharQuestoes ? "ordem sorteada" : "ordem definida por você"} ·
+      a alternativa correta está destacada
+    </div>
+    <div class="row" style="justify-content:flex-start; gap:8px; margin-bottom:18px;">
+      <button class="btn subtle" id="btn-outro-aluno">Sortear outro aluno</button>
+      <span class="mono muted" style="font-size:11px;">outro sorteio dos valores, das alternativas e da ordem</span>
+    </div>
+    ${paginas.map((pg, ip) => {
+      const bloco = pg.questoes.length > 1;
+      const figura = figuraDe(pg.questoes[0], s.questoes);
+      // igual ao aluno.js: dentro de um bloco a figura se repete acima de cada pergunta,
+      // pra ninguem precisar rolar de volta ao topo. Mesmo data URL em todas as tags.
+      const imgFigura = (margem) =>
+        figura
+          ? `<img src="${figura}" style="max-width:min(100%, 420px); max-height:300px; width:auto; height:auto; display:block; margin:${margem}; border:1px solid var(--line-faint);" />`
+          : "";
+      const comum = sufixoComum(pg.questoes.map((q) => q.enunciado));
+      const especifico = (q) =>
+        comum && q.enunciado.endsWith(comum) ? q.enunciado.slice(0, q.enunciado.length - comum.length).trimEnd() : q.enunciado;
+      return `
+        <div class="card" style="margin-bottom:16px;">
+          ${corners()}
+          <div class="row" style="align-items:flex-start;">
+            ${bloco
+              ? `<span class="mono" style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; font-weight:600; padding:3px 8px; color:rgb(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb}); border:1px solid rgba(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb},.5); background:rgba(${(cores.get(pg.grupo) || PALETA_BLOCO[0]).rgb},.08);">Página ${ip + 1} · bloco ${pg.grupo} · ${pg.questoes.length} questões</span>`
+              : `<span class="pill">Página ${ip + 1} · ${pg.questoes[0].tema}</span>`}
+          </div>
+          ${bloco ? "" : imgFigura("12px auto 0")}
+          ${comum ? `<div style="font-size:14px; line-height:1.7; margin-top:12px; padding:10px 12px; background:rgba(79,209,197,.06); border-left:3px solid var(--teal);">${formatarEnunciado(comum)}</div>` : ""}
+          ${pg.questoes.map((q, i) => {
+            const params = Object.entries(q.parametros || {})
+              .filter(([, v]) => typeof v === "number")
+              .map(([k, v]) => `${k} = ${formatarBR(v)}`)
+              .join("   ·   ");
+            return `
+              <div style="margin-top:${i === 0 && !comum && !figura ? "12px" : "18px"}; ${bloco ? "border-top:1px solid var(--line-faint); padding-top:14px;" : ""}">
+                <div class="row" style="align-items:flex-start;">
+                  <span class="mono muted" style="font-size:11px;">QUESTÃO ${numero(q)} de ${s.questoes.length}</span>
+                  <span class="mono" style="font-size:11px; color:var(--green);">resposta ${q.respostaCorretaLetra}</span>
+                </div>
+                ${bloco ? imgFigura("10px auto 0") : ""}
+                <div style="font-size:14.5px; line-height:1.7; margin-top:8px;">${formatarEnunciado(especifico(q))}</div>
+                <div style="margin-top:12px;">${renderAlternativasPreview(q.alternativas, q.formatoResposta)}</div>
+                <details style="margin-top:10px;">
+                  <summary class="mono muted" style="font-size:11px; cursor:pointer;">valores sorteados</summary>
+                  <div class="mono muted" style="font-size:11px; line-height:1.8; margin-top:6px; word-break:break-word;">${params}</div>
+                </details>
+              </div>`;
+          }).join("")}
+        </div>`;
+    }).join("")}
+    <button class="btn subtle" id="voltar-montar-2" style="width:100%; justify-content:center;">← voltar e ajustar o TDE</button>
+  `;
+  content.querySelectorAll("#voltar-montar, #voltar-montar-2").forEach((el) =>
+    el.addEventListener("click", (e) => { e.preventDefault(); setView("montar"); })
+  );
+  document.getElementById("btn-outro-aluno").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Sorteando…";
+    try {
+      state.simulacao = await api("/provas-mestre/simular", {
+        method: "POST",
+        body: JSON.stringify({
+          questaoIds: Array.from(state.selecionadas),
+          embaralharQuestoes: state.embaralharQuestoes,
+          seed: "exemplo-" + Date.now() + "-" + Math.random(),
+        }),
+      });
+      renderSimular();
+    } catch (err) {
+      e.target.disabled = false;
+      e.target.textContent = "Sortear outro aluno";
+    }
+  });
+}
+
+function renderMontarSucesso() {
+  const r = state.publicarResultado;
+  content.innerHTML = `
+    <div class="seal" style="margin-bottom:16px;">✓ TDE PUBLICADO · EQUIVALÊNCIA VERIFICADA</div>
+    <h1 style="margin-bottom:20px;">TDE publicado</h1>
+    <div class="card accent-teal" style="margin-bottom:20px;">
+      ${corners()}
+      <div class="grid-stats">
+        <div><div class="stat-label">Provas geradas</div><div class="stat-value">${r.totalGeradas}<small>alunos</small></div></div>
+      </div>
+      <div class="divider" style="font-size:13px; color:var(--ink-muted); line-height:1.6;">
+        Cada aluno recebeu uma prova individual: mesmas questões, ordem embaralhada, valores numéricos e alternativas
+        recalculados. Um <span class="mono" style="color:var(--teal);">seed</span> único por aluno garante que a geração seja auditável.
+      </div>
+    </div>
+    <div class="card">
+      ${corners()}
+      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:6px;">Link pra passar pra turma inteira</div>
+      <div class="row" style="margin-bottom:16px; gap:8px;">
+        <input readonly id="link-turma-tde" value="${window.location.origin}/aluno.html?prova=${r.provaMestreId}" class="mono" style="flex:1; padding:8px 10px; font-size:12.5px; background:var(--surface-raised); border:1px solid var(--line); color:var(--teal);" onclick="this.select()" />
+        <button class="btn subtle" id="btn-copiar-link-turma" style="padding:8px 12px; font-size:12px;">Copiar</button>
+      </div>
+      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:12px;">Cada aluno entra com a própria matrícula</div>
+      ${r.provas.map((p) => `
+        <div class="row" style="padding:8px 0; border-top:1px solid var(--line-faint);">
+          <span style="font-size:13px;">${p.alunoNome}</span>
+          <span class="mono" style="font-size:14px; color:var(--teal); letter-spacing:.05em;">${p.qrToken}</span>
+        </div>
+      `).join("")}
+    </div>
+    <button class="btn ghost" style="margin-top:20px;" id="btn-voltar-turma">Voltar à turma</button>
+  `;
+  document.getElementById("btn-copiar-link-turma").addEventListener("click", (ev) => {
+    navigator.clipboard.writeText(document.getElementById("link-turma-tde").value);
+    ev.target.textContent = "Copiado!";
+    setTimeout(() => { ev.target.textContent = "Copiar"; }, 1500);
+  });
+  document.getElementById("btn-voltar-turma").addEventListener("click", () => {
+    state.publicarResultado = null;
+    setView("turmaDetalhe");
+  });
+}
+
+/* ---------------- Resultados ---------------- */
+async function renderResultados() {
+  const provas = await api("/provas-mestre");
+  const publicadas = provas.filter((p) => p.status === "publicada");
+
+  if (publicadas.length === 0) {
+    content.innerHTML = `<div class="card muted" style="text-align:center; padding:40px; font-size:13px;">
+      ${corners()}
+      Nenhum TDE publicado ainda. Crie um dentro de uma turma.</div>`;
+    return;
+  }
+
+  if (!state.provaAtualId || !publicadas.find((p) => p.id === state.provaAtualId)) {
+    state.provaAtualId = publicadas[0].id;
+  }
+
+  const r = await api(`/provas-mestre/${state.provaAtualId}/resultados`);
+  const provaSel = publicadas.find((p) => p.id === state.provaAtualId);
+
+  content.innerHTML = `
+    <div class="eyebrow">RESULTADOS</div>
+    <div class="row" style="margin-bottom:20px; align-items:flex-end;">
+      <h1>${provaSel.titulo} <span class="muted" style="font-size:15px; font-weight:400;">— ${provaSel.turmaNome}</span></h1>
+      <select id="select-prova" class="mono" style="background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:6px 10px; font-size:12px;">
+        ${publicadas.map((p) => `<option value="${p.id}" ${p.id === state.provaAtualId ? "selected" : ""}>${p.turmaNome} — ${p.titulo}</option>`).join("")}
+      </select>
+    </div>
+
+    <div class="grid-stats" style="margin-bottom:14px;">
+      <div class="card">${corners()}<div class="stat-label">Média</div><div class="stat-value">${r.media !== null ? formatarBR(r.media) : "—"}</div></div>
+      <div class="card">${corners()}<div class="stat-label">Mediana</div><div class="stat-value">${r.mediana !== null ? formatarBR(r.mediana) : "—"}</div></div>
+      <div class="card">${corners()}<div class="stat-label">Desvio padrão</div><div class="stat-value">${r.desvioPadrao !== null ? formatarBR(r.desvioPadrao) : "—"}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      ${corners()}
+      <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:10px;">⚠ Questões com mais erro</div>
+      ${r.rankingErros.length === 0 ? `<div class="muted" style="font-size:12.5px;">Ainda sem respostas suficientes.</div>` : r.rankingErros.slice(0,4).map((q) => `
+        <div style="margin-bottom:10px;">
+          <div class="row" style="font-size:12.5px; margin-bottom:4px;"><span class="muted">${q.tema}</span><span class="mono" style="color:var(--amber);">${q.percentualErro}%</span></div>
+          <div style="height:4px; background:var(--line-faint);"><div style="height:4px; width:${q.percentualErro}%; background:var(--amber);"></div></div>
+        </div>
+      `).join("")}
+    </div>
+
+    <div class="card">
+      ${corners()}
+      <div class="row" style="margin-bottom:6px;">
+        <div class="mono muted" style="font-size:11px; letter-spacing:.06em; text-transform:uppercase;">Notas por aluno (${r.totalFinalizadas}/${r.totalAlunos} finalizaram) — vale ${formatarBR(r.valor)} pts</div>
+        <button class="btn subtle" id="btn-exportar-excel" style="font-size:11px; padding:5px 10px;">Exportar Excel</button>
+      </div>
+      ${r.alunos.map((a, i) => `
+        <div style="padding:10px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}">
+          <div class="row">
+            <span style="font-size:13.5px;">${a.alunoNome}${a.notaManual !== null ? ` <span class="pill amber" style="font-size:9.5px; padding:1px 6px;">nota ajustada</span>` : ""}</span>
+            <span class="mono muted" style="font-size:12px;">${a.status === 'finalizada' ? `${a.acertos}/${a.total} acertos${a.tentativasFeitas>1?` (${a.tentativasFeitas} tentativas)`:''}` : a.status}</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-family:var(--f-display); font-weight:700; font-size:15px; width:50px; text-align:right; color:${a.nota===null?'var(--ink-faint)':(a.nota>=r.valor*0.6?'var(--green)':'var(--red)')};">
+                ${a.nota !== null ? formatarBR(+a.nota.toFixed(2)) : "—"}
+              </span>
+              <button class="btn subtle" style="font-size:10.5px; padding:3px 8px;" data-editar-nota="${a.alunoId}" data-nota-atual="${a.nota !== null ? a.nota : ""}" data-tem-manual="${a.notaManual !== null}">Alterar</button>
+              ${a.status !== "gerada" || a.respondidas > 0 ? `<button class="btn subtle" style="font-size:10.5px; padding:3px 8px; color:var(--red); border-color:rgba(255,107,107,.45);" data-zerar="${a.alunoId}" data-nome="${a.alunoNome.replace(/"/g, "&quot;")}">Zerar</button>` : ""}
+            </div>
+          </div>
+          ${a.notaManual !== null && a.motivoNotaManual ? `<div class="mono muted" style="font-size:10.5px; margin-top:4px;">motivo: ${a.motivoNotaManual}</div>` : ""}
+          <div id="nota-${a.alunoId}"></div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+
+  document.getElementById("select-prova").addEventListener("change", (e) => {
+    state.provaAtualId = e.target.value;
+    renderResultados();
+  });
+
+  content.querySelectorAll("[data-editar-nota]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const alunoId = el.dataset.editarNota;
+      const notaAtual = el.dataset.notaAtual;
+      const temManual = el.dataset.temManual === "true";
+      const alvo = document.getElementById(`nota-${alunoId}`);
+      if (alvo.dataset.painel === "nota") { alvo.innerHTML = ""; alvo.dataset.painel = ""; return; } // clique de novo fecha
+      alvo.dataset.painel = "nota";
+
+      alvo.innerHTML = `
+        <div style="margin-top:8px; padding:10px; background:var(--surface-raised); border:1px solid var(--line-faint); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label class="mono muted" style="font-size:11px;">Nota:</label>
+          <input type="number" step="0.01" min="0" max="${r.valor}" id="input-nota-${alunoId}" value="${notaAtual}" style="background:var(--surface); border:1px solid var(--line); color:var(--ink); padding:5px 8px; font-size:12px; width:90px;" />
+          <input id="input-motivo-${alunoId}" placeholder="motivo (opcional)" style="background:var(--surface); border:1px solid var(--line); color:var(--ink); padding:5px 8px; font-size:12px; flex:1; min-width:160px;" />
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-salvar-nota="${alunoId}">Salvar</button>
+          ${temManual ? `<button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-remover-nota="${alunoId}">Voltar à nota automática</button>` : ""}
+          <span class="muted" style="font-size:10.5px; width:100%;">A nota lançada aqui substitui a calculada. As respostas do aluno não são alteradas.</span>
+          <span id="erro-nota-${alunoId}" style="width:100%;"></span>
+        </div>
+      `;
+
+      document.querySelector(`[data-salvar-nota="${alunoId}"]`).addEventListener("click", async (ev) => {
+        const nota = document.getElementById(`input-nota-${alunoId}`).value;
+        const motivo = document.getElementById(`input-motivo-${alunoId}`).value.trim();
+        const erroEl = document.getElementById(`erro-nota-${alunoId}`);
+        erroEl.innerHTML = "";
+        if (nota === "" || Number(nota) < 0) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">Informe uma nota válida.</div>`;
+          return;
+        }
+        ev.target.disabled = true;
+        try {
+          await api(`/provas-mestre/${state.provaAtualId}/nota-manual`, {
+            method: "PUT",
+            body: JSON.stringify({ alunoId, nota: Number(nota), motivo }),
+          });
+          renderResultados();
+        } catch (e) {
+          erroEl.innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+          ev.target.disabled = false;
+        }
+      });
+
+      document.querySelector(`[data-remover-nota="${alunoId}"]`)?.addEventListener("click", async (ev) => {
+        ev.target.disabled = true;
+        try {
+          await api(`/provas-mestre/${state.provaAtualId}/nota-manual`, {
+            method: "PUT",
+            body: JSON.stringify({ alunoId, nota: null }),
+          });
+          renderResultados();
+        } catch (e) {
+          document.getElementById(`erro-nota-${alunoId}`).innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+          ev.target.disabled = false;
+        }
+      });
+    });
+  });
+
+  // Zerar tentativas: apaga todas as tentativas do aluno neste TDE e gera a tentativa 1 de novo.
+  // Pede confirmacao na propria linha, igual ao "Alterar" (nada de janela de confirmacao do navegador).
+  content.querySelectorAll("[data-zerar]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const alunoId = el.dataset.zerar;
+      const nome = el.dataset.nome;
+      const alvo = document.getElementById(`nota-${alunoId}`);
+      if (alvo.dataset.painel === "zerar") { alvo.innerHTML = ""; alvo.dataset.painel = ""; return; } // clique de novo fecha
+      alvo.dataset.painel = "zerar";
+      alvo.innerHTML = `
+        <div style="margin-top:8px; padding:10px; background:rgba(255,107,107,.06); border:1px solid rgba(255,107,107,.35); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:12.5px; flex:1; min-width:220px;">Zerar as tentativas de <b>${nome}</b>? As respostas, a nota e qualquer ajuste manual deste aluno neste TDE serão apagados, e ele volta a ter a prova sem nenhuma resposta, como tentativa 1.</span>
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px; color:var(--red); border-color:rgba(255,107,107,.55);" data-confirmar-zerar="${alunoId}">Sim, zerar</button>
+          <button class="btn subtle" style="padding:5px 10px; font-size:12px;" data-cancelar-zerar="${alunoId}">Cancelar</button>
+          <span id="erro-zerar-${alunoId}" style="width:100%;"></span>
+        </div>
+      `;
+      document.querySelector(`[data-cancelar-zerar="${alunoId}"]`).addEventListener("click", () => {
+        alvo.innerHTML = ""; alvo.dataset.painel = "";
+      });
+      document.querySelector(`[data-confirmar-zerar="${alunoId}"]`).addEventListener("click", async (ev) => {
+        ev.target.disabled = true;
+        ev.target.textContent = "Zerando...";
+        try {
+          await api(`/provas-mestre/${state.provaAtualId}/zerar-tentativas`, {
+            method: "POST",
+            body: JSON.stringify({ alunoId }),
+          });
+          renderResultados();
+        } catch (e) {
+          document.getElementById(`erro-zerar-${alunoId}`).innerHTML = `<div class="error-box" style="margin-top:6px;">${e.message}</div>`;
+          ev.target.disabled = false;
+          ev.target.textContent = "Sim, zerar";
+        }
+      });
+    });
+  });
+
+  document.getElementById("btn-exportar-excel").addEventListener("click", () => {
+    const linhas = r.alunos.map((a) => ({
+      "Aluno": a.alunoNome,
+      "Matrícula": a.matricula,
+      "Nota": a.nota !== null ? formatarBR(+a.nota.toFixed(2)) : "",
+      "Valor do TDE": formatarBR(r.valor),
+      "Acertos": a.status === "finalizada" ? `${a.acertos}/${a.total}` : "",
+      "Tentativas": a.tentativasFeitas,
+      "Nota ajustada?": a.notaManual !== null ? `Sim${a.motivoNotaManual ? " — " + a.motivoNotaManual : ""}` : "",
+      "Situação": a.nota === null ? "Não finalizou" : (a.nota >= r.valor * 0.6 ? "Aprovado" : "Reprovado"),
+    }));
+    const ws = XLSX.utils.json_to_sheet(linhas);
+    ws["!cols"] = [{ wch: 32 }, { wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Notas");
+    const nomeArquivo = `${provaSel.turmaNome} - ${provaSel.titulo}`.replace(/[^\w\s-]/g, "").trim() + ".xlsx";
+    XLSX.writeFile(wb, nomeArquivo);
+  });
+}
+
+render();
