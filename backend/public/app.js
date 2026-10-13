@@ -448,36 +448,51 @@ async function renderTurmas() {
           const linha = new Array(cabecalho.length).fill("");
           linha[0] = a.matricula;
           linha[1] = a.nome;
-          const empurraNum = (c, v, fmt) => { if (v !== null && v !== undefined) metaNumericas.push({ r, c, v, fmt }); };
-          for (const i of idxG1) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
-          if (idxG1.length) empurraNum(pos.totalG1, Math.ceil(soma(a, idxG1) * 10) / 10, "0.##");
+          const empurraNum = (c, v) => { if (v !== null && v !== undefined) metaNumericas.push({ r, c, v }); };
+          for (const i of idxG1) empurraNum(idxColTde[i], num(a.notas[i]));
+          if (idxG1.length) empurraNum(pos.totalG1, Math.ceil(soma(a, idxG1) * 10) / 10);
           // Nota AV1 = acertos × (10 − soma dos valores dos TDEs da G1) / 10. Fica vazia se o
           // professor ainda nao digitou os acertos daquele aluno.
           if (idxG1.length && a.acertosAV1 !== null && a.acertosAV1 !== undefined) {
             const pontosAV1 = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
-            empurraNum(pos.avG1, Math.round(Number(a.acertosAV1) * pontosAV1 / 10 * 100) / 100, "0.##");
+            empurraNum(pos.avG1, Math.round(Number(a.acertosAV1) * pontosAV1 / 10 * 100) / 100);
           }
-          for (const i of idxG2) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
-          if (idxG2.length) empurraNum(pos.totalG2, Math.ceil(soma(a, idxG2) * 10) / 10, "0.##");
-          if (idxG2.length) empurraNum(pos.avG2, a.notaAV2, "0.##");
-          for (const i of idxSG) empurraNum(idxColTde[i], num(a.notas[i]), "0.##");
+          for (const i of idxG2) empurraNum(idxColTde[i], num(a.notas[i]));
+          if (idxG2.length) empurraNum(pos.totalG2, Math.ceil(soma(a, idxG2) * 10) / 10);
+          if (idxG2.length) empurraNum(pos.avG2, a.notaAV2);
+          for (const i of idxSG) empurraNum(idxColTde[i], num(a.notas[i]));
           matriz.push(linha);
         });
 
         const ws = XLSX.utils.aoa_to_sheet(matriz);
 
-        // substitui os valores numericos (criados como string "") por celulas numericas
+        // substitui os valores numericos (criados como string "") por celulas numericas.
+        // Formato "General": inteiros sem casa decimal ("2") e fracoes com casas naturais
+        // ("1,9", "0,83"). Antes era "0.##", que no LibreOffice/Excel-ptBR deixava uma
+        // virgula solta depois dos inteiros ("1,"), bagunçando a leitura.
         for (const m of metaNumericas) {
-          ws[XLSX.utils.encode_cell({ r: m.r, c: m.c })] = { t: "n", v: m.v, z: m.fmt };
+          ws[XLSX.utils.encode_cell({ r: m.r, c: m.c })] = { t: "n", v: m.v };
         }
 
         // formula =SUM(Total+AV) em cada linha de aluno, nas colunas "Gn"
         const colL = (c) => XLSX.utils.encode_col(c);
         for (let r = 1; r < matriz.length; r++) {
           const linhaExcel = r + 1;
-          if (pos.g1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g1 })] = { t: "n", f: `SUM(${colL(pos.totalG1)}${linhaExcel}+${colL(pos.avG1)}${linhaExcel})`, z: "0.##" };
-          if (pos.g2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g2 })] = { t: "n", f: `SUM(${colL(pos.totalG2)}${linhaExcel}+${colL(pos.avG2)}${linhaExcel})`, z: "0.##" };
+          if (pos.g1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g1 })] = { t: "n", f: `SUM(${colL(pos.totalG1)}${linhaExcel}+${colL(pos.avG1)}${linhaExcel})` };
+          if (pos.g2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g2 })] = { t: "n", f: `SUM(${colL(pos.totalG2)}${linhaExcel}+${colL(pos.avG2)}${linhaExcel})` };
         }
+
+        // calcula o valor atual da nota G1/G2 pra decidir a cor de fundo (azul claro >= 6,
+        // amarelo < 6). Como as celulas carregam formula, o professor pode editar a Nota AV
+        // depois no Excel; o valor recalcula, mas a cor fica fixa da hora da exportacao.
+        const gFinal = (a, idxs, acertos, notaAV, notaAV2Direta) => {
+          if (!idxs.length) return null;
+          const total = Math.ceil(soma(a, idxs) * 10) / 10;
+          const pontosAV = Math.max(0, 10 - idxs.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
+          const av = notaAV2Direta != null ? Number(notaAV2Direta)
+            : (acertos != null ? Math.round(Number(acertos) * pontosAV / 10 * 100) / 100 : 0);
+          return total + av;
+        };
 
         // larguras das colunas (mesma proporcao do modelo do professor)
         const larg = new Array(cabecalho.length).fill({ wch: 10 });
@@ -495,22 +510,51 @@ async function renderTurmas() {
         // (drop-in do SheetJS que exporta estilos; carregado em index.html).
         const bordaFina = { style: "thin", color: { rgb: "808080" } };
         const borda = { top: bordaFina, bottom: bordaFina, left: bordaFina, right: bordaFina };
+        // paleta e espessuras dos destaques pedidos pelo professor:
+        //  - Total TDE e Nota AV: fonte negrito, tamanho padrao
+        //  - G1 / G2 (nota final): negrito e um ponto maior, com fundo colorido pela nota:
+        //     * >= 6 → azul clarinho (aprovado)
+        //     * <  6 → amarelo clarinho (chamar atencao)
+        const COR_APROVADO = "D9E1F2";  // azul claro
+        const COR_REPROVADO = "FFF2CC"; // amarelo claro
+        const colsTotalOuAV = new Set([pos.totalG1, pos.avG1, pos.totalG2, pos.avG2].filter((c) => c >= 0));
+        const colsG = new Set([pos.g1, pos.g2].filter((c) => c >= 0));
         const estiloHeader = {
           fill: { patternType: "solid", fgColor: { rgb: "FCD5B5" } },
           alignment: { horizontal: "center", vertical: "center", wrapText: true },
           font: { name: "Calibri", sz: 12 },
           border: borda,
         };
+        const estiloHeaderBold = { ...estiloHeader, font: { name: "Calibri", sz: 12, bold: true } };
+        const estiloHeaderG   = { ...estiloHeader, font: { name: "Calibri", sz: 13, bold: true } };
         const estiloEsq = { alignment: { horizontal: "left", vertical: "center" }, font: { name: "Calibri", sz: 12 }, border: borda };
         const estiloCentrado = { alignment: { horizontal: "center", vertical: "center" }, font: { name: "Calibri", sz: 12 }, border: borda };
+        const estiloBold = { ...estiloCentrado, font: { name: "Calibri", sz: 12, bold: true } };
+        const estiloG = (cor) => ({
+          ...estiloCentrado,
+          font: { name: "Calibri", sz: 13, bold: true },
+          ...(cor ? { fill: { patternType: "solid", fgColor: { rgb: cor } } } : {}),
+        });
 
-        // aplica
+        // calcula a cor de G1/G2 por aluno pra pintar as celulas das colunas finais
+        const corPorLinhaG1 = dados.alunos.map((a) => { const v = gFinal(a, idxG1, a.acertosAV1, null, null); return v == null ? null : (v >= 6 ? COR_APROVADO : COR_REPROVADO); });
+        const corPorLinhaG2 = dados.alunos.map((a) => { const v = gFinal(a, idxG2, null, null, a.notaAV2); return v == null ? null : (v >= 6 ? COR_APROVADO : COR_REPROVADO); });
+
+        // aplica estilo celula a celula
         for (let r = 0; r < matriz.length; r++) {
           for (let c = 0; c < cabecalho.length; c++) {
             const ref = XLSX.utils.encode_cell({ r, c });
-            if (!ws[ref]) ws[ref] = { t: "s", v: "" };  // garante que a celula vazia tambem leve estilo
-            if (r === 0) ws[ref].s = estiloHeader;
-            else ws[ref].s = (c <= 1) ? estiloEsq : estiloCentrado;
+            if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+            if (r === 0) {
+              ws[ref].s = colsG.has(c) ? estiloHeaderG : colsTotalOuAV.has(c) ? estiloHeaderBold : estiloHeader;
+            } else {
+              if (c <= 1) ws[ref].s = estiloEsq;
+              else if (colsG.has(c)) {
+                const cor = c === pos.g1 ? corPorLinhaG1[r - 1] : corPorLinhaG2[r - 1];
+                ws[ref].s = estiloG(cor);
+              } else if (colsTotalOuAV.has(c)) ws[ref].s = estiloBold;
+              else ws[ref].s = estiloCentrado;
+            }
           }
         }
         // garante que o range cobre todo o retangulo (pra o estilo das celulas vazias valer)
