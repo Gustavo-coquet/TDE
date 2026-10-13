@@ -427,12 +427,15 @@ async function renderTurmas() {
         // de cada grupo pra depois escrever formulas e larguras certinho.
         const cabecalho = ["Matricula", "Nome"];
         const idxColTde = {};  // indice do TDE original -> coluna no xlsx
-        const pos = { totalG1: -1, avG1: -1, g1: -1, totalG2: -1, avG2: -1, g2: -1 };
+        const pos = { avG1: -1, g1: -1, avG2: -1, g2: -1 };
         const empurra = (titulo) => { cabecalho.push(titulo); return cabecalho.length - 1; };
+        // Colunas por grupo: TDEs → Nota AVn → Gn (sem coluna "Total TDE" intermediaria;
+        // a nota final G sai direto do SUM dos TDEs + AV; texto como "Nao Fez" e "Faltou"
+        // sao ignorados pelo SUM automaticamente).
         for (const i of idxG1) idxColTde[i] = empurra(colTde(i));
-        if (idxG1.length) { pos.totalG1 = empurra("Total TDE (G1)"); pos.avG1 = empurra("Nota AV1"); pos.g1 = empurra("G1"); }
+        if (idxG1.length) { pos.avG1 = empurra("Nota AV1"); pos.g1 = empurra("G1"); }
         for (const i of idxG2) idxColTde[i] = empurra(colTde(i));
-        if (idxG2.length) { pos.totalG2 = empurra("Total TDE (G2)"); pos.avG2 = empurra("Nota AV2"); pos.g2 = empurra("G2"); }
+        if (idxG2.length) { pos.avG2 = empurra("Nota AV2"); pos.g2 = empurra("G2"); }
         for (const i of idxSG) idxColTde[i] = empurra(colTde(i));
 
         // monta a matriz. Guardamos VALORES NUMERICOS (nao texto "1,9") para que as formulas
@@ -442,25 +445,38 @@ async function renderTurmas() {
         const soma = (a, idxs) => idxs.reduce((acc, i) => acc + (a.notas[i] === null || a.notas[i] === undefined ? 0 : Number(a.notas[i])), 0);
         const num = (v) => (v === null || v === undefined ? null : +Number(v).toFixed(2));
         const matriz = [cabecalho];
-        const metaNumericas = [];  // {r, c, valor, fmt} pra atribuir dps como celula numerica
+        const metaNumericas = [];  // {r, c, v} pra atribuir dps como celula numerica
+        const metaTextos = [];     // {r, c, v} pra escrever "Nao Fez" ou "Faltou" como texto
         dados.alunos.forEach((a, k) => {
           const r = k + 1;
           const linha = new Array(cabecalho.length).fill("");
           linha[0] = a.matricula;
           linha[1] = a.nome;
           const empurraNum = (c, v) => { if (v !== null && v !== undefined) metaNumericas.push({ r, c, v }); };
-          for (const i of idxG1) empurraNum(idxColTde[i], num(a.notas[i]));
-          if (idxG1.length) empurraNum(pos.totalG1, Math.ceil(soma(a, idxG1) * 10) / 10);
-          // Nota AV1 = acertos × (10 − soma dos valores dos TDEs da G1) / 10. Fica vazia se o
-          // professor ainda nao digitou os acertos daquele aluno.
-          if (idxG1.length && a.acertosAV1 !== null && a.acertosAV1 !== undefined) {
-            const pontosAV1 = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
-            empurraNum(pos.avG1, Math.round(Number(a.acertosAV1) * pontosAV1 / 10 * 100) / 100);
+          const empurraTxt = (c, t) => metaTextos.push({ r, c, v: t });
+          // TDE que o aluno nao fez entra como texto "Nao Fez" (em vez de celula vazia),
+          // AV1 vira "Faltou" se o professor marcou. O SUM final ignora texto, entao a nota
+          // final G nao estoura #VALUE!.
+          for (const i of idxG1) {
+            if (a.notas[i] == null) empurraTxt(idxColTde[i], "Não Fez");
+            else empurraNum(idxColTde[i], num(a.notas[i]));
           }
-          for (const i of idxG2) empurraNum(idxColTde[i], num(a.notas[i]));
-          if (idxG2.length) empurraNum(pos.totalG2, Math.ceil(soma(a, idxG2) * 10) / 10);
-          if (idxG2.length) empurraNum(pos.avG2, a.notaAV2);
-          for (const i of idxSG) empurraNum(idxColTde[i], num(a.notas[i]));
+          if (idxG1.length) {
+            if (a.faltouAV1) empurraTxt(pos.avG1, "Faltou");
+            else if (a.acertosAV1 != null) {
+              const pontosAV1 = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
+              empurraNum(pos.avG1, Math.round(Number(a.acertosAV1) * pontosAV1 / 10 * 100) / 100);
+            }
+          }
+          for (const i of idxG2) {
+            if (a.notas[i] == null) empurraTxt(idxColTde[i], "Não Fez");
+            else empurraNum(idxColTde[i], num(a.notas[i]));
+          }
+          if (idxG2.length && a.notaAV2 != null) empurraNum(pos.avG2, a.notaAV2);
+          for (const i of idxSG) {
+            if (a.notas[i] == null) empurraTxt(idxColTde[i], "Não Fez");
+            else empurraNum(idxColTde[i], num(a.notas[i]));
+          }
           matriz.push(linha);
         });
 
@@ -473,25 +489,38 @@ async function renderTurmas() {
         for (const m of metaNumericas) {
           ws[XLSX.utils.encode_cell({ r: m.r, c: m.c })] = { t: "n", v: m.v };
         }
-
-        // formula =SUM(Total+AV) em cada linha de aluno, nas colunas "Gn"
-        const colL = (c) => XLSX.utils.encode_col(c);
-        for (let r = 1; r < matriz.length; r++) {
-          const linhaExcel = r + 1;
-          if (pos.g1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g1 })] = { t: "n", f: `SUM(${colL(pos.totalG1)}${linhaExcel}+${colL(pos.avG1)}${linhaExcel})` };
-          if (pos.g2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g2 })] = { t: "n", f: `SUM(${colL(pos.totalG2)}${linhaExcel}+${colL(pos.avG2)}${linhaExcel})` };
+        for (const m of metaTextos) {
+          ws[XLSX.utils.encode_cell({ r: m.r, c: m.c })] = { t: "s", v: m.v };
         }
 
-        // calcula o valor atual da nota G1/G2 pra decidir a cor de fundo (azul claro >= 6,
-        // amarelo < 6). Como as celulas carregam formula, o professor pode editar a Nota AV
-        // depois no Excel; o valor recalcula, mas a cor fica fixa da hora da exportacao.
-        const gFinal = (a, idxs, acertos, notaAV, notaAV2Direta) => {
-          if (!idxs.length) return null;
-          const total = Math.ceil(soma(a, idxs) * 10) / 10;
-          const pontosAV = Math.max(0, 10 - idxs.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
-          const av = notaAV2Direta != null ? Number(notaAV2Direta)
-            : (acertos != null ? Math.round(Number(acertos) * pontosAV / 10 * 100) / 100 : 0);
-          return total + av;
+        // G1 = SUM(TDEs da G1 : Nota AV1). G2 = SUM(TDEs da G2 : Nota AV2).
+        // Como as colunas sao contiguas (TDEs ... AV), o SUM num intervalo A1:F1 cobre
+        // tudo e, importante, IGNORA automaticamente as celulas que viraram texto ("Nao Fez"
+        // ou "Faltou"), evitando o erro #VALUE! que acontece quando a gente usa + direto.
+        const colL = (c) => XLSX.utils.encode_col(c);
+        const primeiraCol = (idxs) => idxs.length ? idxColTde[idxs[0]] : -1;
+        const firstG1 = primeiraCol(idxG1);
+        const firstG2 = primeiraCol(idxG2);
+        for (let r = 1; r < matriz.length; r++) {
+          const linhaExcel = r + 1;
+          if (pos.g1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g1 })] = { t: "n", f: `SUM(${colL(firstG1)}${linhaExcel}:${colL(pos.avG1)}${linhaExcel})` };
+          if (pos.g2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.g2 })] = { t: "n", f: `SUM(${colL(firstG2)}${linhaExcel}:${colL(pos.avG2)}${linhaExcel})` };
+        }
+
+        // Nota final G1/G2 calculada no cliente so pra decidir a cor de fundo. "Nao Fez" e
+        // "Faltou" entram como 0 (igual ao que o SUM do Excel faria, ignorando texto).
+        const gFinalG1 = (a) => {
+          if (!idxG1.length) return null;
+          const totalTdes = idxG1.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
+          const pontosAV = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
+          const av = a.faltouAV1 ? 0 : (a.acertosAV1 != null ? Math.round(Number(a.acertosAV1) * pontosAV / 10 * 100) / 100 : 0);
+          return totalTdes + av;
+        };
+        const gFinalG2 = (a) => {
+          if (!idxG2.length) return null;
+          const totalTdes = idxG2.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
+          const av = a.notaAV2 != null ? Number(a.notaAV2) : 0;
+          return totalTdes + av;
         };
 
         // larguras das colunas (mesma proporcao do modelo do professor)
@@ -499,9 +528,9 @@ async function renderTurmas() {
         larg[0] = { wch: 14.83 };   // Matricula
         larg[1] = { wch: 32.83 };   // Nome
         for (const i of idxG1) larg[idxColTde[i]] = { wch: 10 };
-        if (pos.totalG1 >= 0) { larg[pos.totalG1] = { wch: 13 }; larg[pos.avG1] = { wch: 13 }; larg[pos.g1] = { wch: 10 }; }
+        if (pos.avG1 >= 0) { larg[pos.avG1] = { wch: 13 }; larg[pos.g1] = { wch: 10 }; }
         for (const i of idxG2) larg[idxColTde[i]] = { wch: 10 };
-        if (pos.totalG2 >= 0) { larg[pos.totalG2] = { wch: 13 }; larg[pos.avG2] = { wch: 13 }; larg[pos.g2] = { wch: 10 }; }
+        if (pos.avG2 >= 0) { larg[pos.avG2] = { wch: 13 }; larg[pos.g2] = { wch: 10 }; }
         for (const i of idxSG) larg[idxColTde[i]] = { wch: 10 };
         ws["!cols"] = larg;
         ws["!rows"] = [{ hpt: 32 }];  // cabecalho mais alto, pra caber duas linhas com wrap
@@ -517,7 +546,7 @@ async function renderTurmas() {
         //     * <  6 → amarelo clarinho (chamar atencao)
         const COR_APROVADO = "D9E1F2";  // azul claro
         const COR_REPROVADO = "FFF2CC"; // amarelo claro
-        const colsTotalOuAV = new Set([pos.totalG1, pos.avG1, pos.totalG2, pos.avG2].filter((c) => c >= 0));
+        const colsTotalOuAV = new Set([pos.avG1, pos.avG2].filter((c) => c >= 0));
         const colsG = new Set([pos.g1, pos.g2].filter((c) => c >= 0));
         const estiloHeader = {
           fill: { patternType: "solid", fgColor: { rgb: "FCD5B5" } },
@@ -537,8 +566,8 @@ async function renderTurmas() {
         });
 
         // calcula a cor de G1/G2 por aluno pra pintar as celulas das colunas finais
-        const corPorLinhaG1 = dados.alunos.map((a) => { const v = gFinal(a, idxG1, a.acertosAV1, null, null); return v == null ? null : (v >= 6 ? COR_APROVADO : COR_REPROVADO); });
-        const corPorLinhaG2 = dados.alunos.map((a) => { const v = gFinal(a, idxG2, null, null, a.notaAV2); return v == null ? null : (v >= 6 ? COR_APROVADO : COR_REPROVADO); });
+        const corPorLinhaG1 = dados.alunos.map((a) => { const v = gFinalG1(a); return v == null ? null : (v >= 6 ? COR_APROVADO : COR_REPROVADO); });
+        const corPorLinhaG2 = dados.alunos.map((a) => { const v = gFinalG2(a); return v == null ? null : (v >= 6 ? COR_APROVADO : COR_REPROVADO); });
 
         // aplica estilo celula a celula
         for (let r = 0; r < matriz.length; r++) {
@@ -609,7 +638,7 @@ async function renderTurmaDetalhe() {
               <span style="font-size:13px; flex:1 1 220px;">${a.nome} <span class="mono muted" style="font-size:11px;">— matrícula ${a.matricula}</span></span>
               <div style="display:flex; align-items:center; gap:6px; font-size:11px;">
                 <label style="color:var(--ink-faint);" title="Quantas das 10 questões da AV1 o aluno acertou. A nota sai de acertos × (10 - soma dos TDEs da G1) / 10.">Acertos AV1</label>
-                <input data-nota-av="acertosAV1" data-aluno="${a.id}" type="number" step="0.5" min="0" max="10" value="${a.acertosAV1 ?? ""}" placeholder="—" style="width:52px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Quantas das 10 questões a aluno acertou (inteiro 0 a 10). A nota é calculada: acertos × (10 − soma dos valores dos TDEs da G1) / 10." />
+                <input data-nota-av="acertosAV1" data-aluno="${a.id}" type="text" inputmode="decimal" value="${a.faltouAV1 ? "Faltou" : (a.acertosAV1 ?? "")}" placeholder="—" style="width:62px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Quantas das 10 questões o aluno acertou (0 a 10, aceita meios). Digite &quot;Faltou&quot; se ele não compareceu." />
                 <span style="color:var(--ink-faint); font-size:10px;">/10</span>
                 <label style="color:var(--ink-faint); margin-left:10px;" title="Nota direta da AV2 (0 a 10). Discursiva, pesos variáveis — você digita a nota final já calculada.">Nota AV2</label>
                 <input data-nota-av="notaAV2" data-aluno="${a.id}" type="number" step="0.1" min="0" max="10" value="${a.notaAV2 ?? ""}" placeholder="—" style="width:60px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G2 (0 a 10)" />
@@ -774,7 +803,15 @@ async function renderTurmaDetalhe() {
       const erroEl = document.getElementById(`erro-av-${alunoId}`);
       erroEl.textContent = "";
       try {
-        const valor = el.value.trim() === "" ? null : Number(el.value);
+        const bruto = el.value.trim();
+        let valor;
+        if (bruto === "") valor = null;
+        else if (campo === "acertosAV1" && /^faltou$/i.test(bruto)) {
+          valor = "Faltou"; el.value = "Faltou";
+        } else {
+          valor = Number(bruto.replace(",", "."));
+          if (!isFinite(valor)) throw new Error("Digite um número de 0 a 10, ou 'Faltou' (apenas no AV1).");
+        }
         await api(`/alunos/${alunoId}/nota-av`, { method: "PUT", body: JSON.stringify({ campo, valor }) });
         el.dataset.prev = el.value;
       } catch (e) {

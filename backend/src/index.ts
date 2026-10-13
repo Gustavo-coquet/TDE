@@ -67,6 +67,7 @@ async function atualizarEsquema() {
     await prisma.$executeRawUnsafe('ALTER TABLE "ProvaMestre" ADD COLUMN IF NOT EXISTS "grupoAvaliacao" TEXT');
     await prisma.$executeRawUnsafe('ALTER TABLE "ProvaMestre" ADD COLUMN IF NOT EXISTS "ordem" INTEGER');
     await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ADD COLUMN IF NOT EXISTS "acertosAV1" DOUBLE PRECISION');
+    await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ADD COLUMN IF NOT EXISTS "faltouAV1" BOOLEAN');
     // Se a coluna foi criada no deploy anterior como INTEGER (quando so aceitavamos inteiros),
     // converte para DOUBLE PRECISION preservando os valores digitados. Idempotente.
     await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ALTER COLUMN "acertosAV1" TYPE DOUBLE PRECISION USING "acertosAV1"::double precision');

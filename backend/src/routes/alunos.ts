@@ -55,6 +55,16 @@ alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
   if (campo !== "acertosAV1" && campo !== "notaAV2") {
     return res.status(400).json({ erro: "campo precisa ser \"acertosAV1\" ou \"notaAV2\"." });
   }
+  // trata o sentinela "Faltou" como marcacao especial no campo acertosAV1: salva
+  // acertos=null e faltouAV1=true, pra o export sair com a palavra em vez da nota.
+  if (campo === "acertosAV1" && typeof valor === "string" && /^faltou$/i.test(String(valor).trim())) {
+    try {
+      const aluno = await prisma.aluno.update({ where: { id }, data: { acertosAV1: null, faltouAV1: true } });
+      return res.json({ id: aluno.id, acertosAV1: null, faltouAV1: true });
+    } catch (e: any) {
+      return res.status(404).json({ erro: "Aluno nao encontrado." });
+    }
+  }
   let num: number | null = null;
   if (valor !== null && valor !== undefined && valor !== "") {
     num = Number(valor);
@@ -63,7 +73,7 @@ alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
     }
     if (campo === "acertosAV1") {
       if (num < 0 || num > 10 || !Number.isInteger(num * 2)) {
-        return res.status(400).json({ erro: "Acertos precisa estar entre 0 e 10, em multiplos de 0,5." });
+        return res.status(400).json({ erro: "Acertos precisa estar entre 0 e 10, em multiplos de 0,5 (ou \"Faltou\")." });
       }
     } else {
       if (num < 0 || num > 10) {
@@ -71,9 +81,11 @@ alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
       }
     }
   }
+  // ao salvar numero (ou apagar), tambem limpa a marca de "Faltou" no caso de acertosAV1
+  const dados = campo === "acertosAV1" ? { acertosAV1: num, faltouAV1: false } : { [campo]: num };
   try {
-    const aluno = await prisma.aluno.update({ where: { id }, data: { [campo]: num } });
-    res.json({ id: aluno.id, [campo]: (aluno as any)[campo] });
+    const aluno = await prisma.aluno.update({ where: { id }, data: dados as any });
+    res.json({ id: aluno.id, acertosAV1: (aluno as any).acertosAV1, faltouAV1: (aluno as any).faltouAV1, notaAV2: (aluno as any).notaAV2 });
   } catch (e: any) {
     res.status(404).json({ erro: "Aluno nao encontrado." });
   }
