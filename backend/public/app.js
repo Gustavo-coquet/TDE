@@ -420,15 +420,30 @@ async function renderTurmas() {
           dados.tdes = novosTdes;
           dados.alunos = dados.alunos.map((a) => ({ ...a, notas: ordemAntiga.map((i) => a.notas[i]) }));
         }
-        // Monta a planilha. Estrutura: Matricula, Nome, (bloco G1), (bloco G2), (sem grupo).
-        // Cada bloco de grupo G leva: um TDE por coluna, depois "Total TDE (G)",
-        // depois "Nota AVn" (vazia, pro professor preencher) e depois a coluna final
-        // "Gn" com formula =SUM(Total+AV) — somando a nota dos TDEs do grupo com a prova.
-        // Totais sao arredondados PARA CIMA com 1 casa decimal (Math.ceil(x*10)/10).
-        const idxG1 = dados.tdes.map((t, i) => t.grupoAvaliacao === "G1" ? i : -1).filter((i) => i >= 0);
-        const idxG2 = dados.tdes.map((t, i) => t.grupoAvaliacao === "G2" ? i : -1).filter((i) => i >= 0);
-        const idxSG = dados.tdes.map((t, i) => !t.grupoAvaliacao ? i : -1).filter((i) => i >= 0);
+        // O professor pediu UM ARQUIVO POR AVALIACAO: se a turma tem TDEs em G1 e em G2,
+        // sai um Resultados - Turma - G1.xlsx e um Resultados - Turma - G2.xlsx separados.
+        // TDEs sem grupo (se houver) saem num terceiro arquivo "Outros", pra ninguem perder
+        // nota solta. Cada arquivo tem a MESMA estrutura (TDEs → Nota AVn → Gn) e os mesmos
+        // estilos — a unica diferenca eh que so as colunas daquele grupo entram.
+        const idxG1Full = dados.tdes.map((t, i) => t.grupoAvaliacao === "G1" ? i : -1).filter((i) => i >= 0);
+        const idxG2Full = dados.tdes.map((t, i) => t.grupoAvaliacao === "G2" ? i : -1).filter((i) => i >= 0);
+        const idxSGFull = dados.tdes.map((t, i) => !t.grupoAvaliacao ? i : -1).filter((i) => i >= 0);
         const colTde = (i) => `${dados.tdes[i].titulo} (vale ${formatarBR(dados.tdes[i].valor)})`;
+
+        // lista de arquivos a gerar: um por grupo que tem TDE.
+        const grupos = [];
+        if (idxG1Full.length) grupos.push({ chave: "G1", sufixo: " - G1" });
+        if (idxG2Full.length) grupos.push({ chave: "G2", sufixo: " - G2" });
+        if (idxSGFull.length) grupos.push({ chave: "SG", sufixo: " - Outros" });
+        if (!grupos.length) throw new Error("Nenhum TDE para exportar.");
+
+        for (const grupo of grupos) {
+        // dentro do loop: so os TDEs deste grupo entram. As variaveis idxG1/idxG2/idxSG passam
+        // a ser locais do loop — a chave que nao for do grupo atual fica como array vazio pra
+        // o resto da logica (formulas, cores, PDF) nao precisar mudar.
+        const idxG1 = grupo.chave === "G1" ? idxG1Full : [];
+        const idxG2 = grupo.chave === "G2" ? idxG2Full : [];
+        const idxSG = grupo.chave === "SG" ? idxSGFull : [];
 
         // monta o cabecalho guardando a POSICAO (coluna 0-indexed) das colunas especiais
         // de cada grupo pra depois escrever formulas e larguras certinho.
@@ -598,14 +613,15 @@ async function renderTurmas() {
         // garante que o range cobre todo o retangulo (pra o estilo das celulas vazias valer)
         ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: matriz.length - 1, c: cabecalho.length - 1 } });
 
-        const baseNome = `Resultados - ${nomeTurma}`.replace(/[\\/:*?"<>|]/g, "").trim();
+        const baseNome = `Resultados - ${nomeTurma}${grupo.sufixo}`.replace(/[\\/:*?"<>|]/g, "").trim();
 
         if (tipo === "pdf") {
           // ---------- PDF ----------
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
           doc.setFontSize(13);
-          doc.text(nomeTurma, 24, 28);
+          const rotuloGrupo = grupo.chave === "SG" ? "Outros TDEs" : grupo.chave;
+          doc.text(`${nomeTurma} — ${rotuloGrupo}`, 24, 28);
           doc.setFontSize(9);
           doc.setTextColor(110);
           // Data da prova = ultimo prazoFinal entre os TDEs do grupo (a prova foi no dia da
@@ -703,6 +719,7 @@ async function renderTurmas() {
           XLSX.utils.book_append_sheet(wb, ws, "Notas");
           XLSX.writeFile(wb, baseNome + ".xlsx");
         }
+        } // fim do loop por grupo
       } catch (e) {
         alert("Erro ao exportar: " + e.message);
       } finally {
