@@ -26,6 +26,7 @@ model Aluno {
   acertosAV1        Float?            // acertos da AV1 em multiplos de 0,5 (0..10). Nota = acertos * (10 - soma dos valores dos TDEs da G1) / 10
   faltouAV1         Boolean?          // marca que o aluno nao fez a AV1; no export sai "Faltou" em vez de nota
   notaAV2           Float?            // nota da avaliacao presencial da G2
+  notaAV1Manual     Float?            // AV1 digitada direto pelo professor (0..10). Quando setada, substitui o calculo por acertos no export.
   provasIndividuais ProvaIndividual[]
 
   @@unique([turmaId, matricula])

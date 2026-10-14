@@ -52,15 +52,16 @@ alunosRouter.post("/", asyncHandler(async (req, res) => {
 alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { campo, valor } = (req.body || {}) as { campo?: string; valor?: number | string | null };
-  if (campo !== "acertosAV1" && campo !== "notaAV2") {
-    return res.status(400).json({ erro: "campo precisa ser \"acertosAV1\" ou \"notaAV2\"." });
+  if (campo !== "acertosAV1" && campo !== "notaAV2" && campo !== "notaAV1Manual") {
+    return res.status(400).json({ erro: "campo precisa ser \"acertosAV1\", \"notaAV1Manual\" ou \"notaAV2\"." });
   }
-  // trata o sentinela "Faltou" como marcacao especial no campo acertosAV1: salva
-  // acertos=null e faltouAV1=true, pra o export sair com a palavra em vez da nota.
-  if (campo === "acertosAV1" && typeof valor === "string" && /^faltou$/i.test(String(valor).trim())) {
+  const ehAV1 = campo === "acertosAV1" || campo === "notaAV1Manual";
+  // trata o sentinela "Faltou": vale em qualquer campo de AV1 (por acertos ou nota direta).
+  // Zera acertos, zera a nota manual e marca faltouAV1=true, pra o export sair "Faltou".
+  if (ehAV1 && typeof valor === "string" && /^faltou$/i.test(String(valor).trim())) {
     try {
-      const aluno = await prisma.aluno.update({ where: { id }, data: { acertosAV1: null, faltouAV1: true } });
-      return res.json({ id: aluno.id, acertosAV1: null, faltouAV1: true });
+      const aluno = await prisma.aluno.update({ where: { id }, data: { acertosAV1: null, notaAV1Manual: null, faltouAV1: true } as any });
+      return res.json({ id: aluno.id, acertosAV1: null, notaAV1Manual: null, faltouAV1: true, notaAV2: (aluno as any).notaAV2 });
     } catch (e: any) {
       return res.status(404).json({ erro: "Aluno nao encontrado." });
     }
@@ -81,11 +82,15 @@ alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
       }
     }
   }
-  // ao salvar numero (ou apagar), tambem limpa a marca de "Faltou" no caso de acertosAV1
-  const dados = campo === "acertosAV1" ? { acertosAV1: num, faltouAV1: false } : { [campo]: num };
+  // Modo da AV1 e implícito: setar um dos campos (acertos ou nota direta) zera o outro
+  // pra nao ficarem dois valores concorrentes. "Faltou" tambem limpa quando a nota entra.
+  let dados: any;
+  if (campo === "acertosAV1")      dados = { acertosAV1: num,  notaAV1Manual: null, faltouAV1: false };
+  else if (campo === "notaAV1Manual") dados = { notaAV1Manual: num, acertosAV1: null,   faltouAV1: false };
+  else                              dados = { [campo]: num };
   try {
-    const aluno = await prisma.aluno.update({ where: { id }, data: dados as any });
-    res.json({ id: aluno.id, acertosAV1: (aluno as any).acertosAV1, faltouAV1: (aluno as any).faltouAV1, notaAV2: (aluno as any).notaAV2 });
+    const aluno = await prisma.aluno.update({ where: { id }, data: dados });
+    res.json({ id: aluno.id, acertosAV1: (aluno as any).acertosAV1, notaAV1Manual: (aluno as any).notaAV1Manual, faltouAV1: (aluno as any).faltouAV1, notaAV2: (aluno as any).notaAV2 });
   } catch (e: any) {
     res.status(404).json({ erro: "Aluno nao encontrado." });
   }

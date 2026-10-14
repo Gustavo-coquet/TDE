@@ -484,7 +484,10 @@ async function renderTurmas() {
             else empurraNum(idxColTde[i], num(a.notas[i]));
           }
           if (idxG1.length) {
+            // Dois modos de AV1: nota manual (notaAV1Manual) tem prioridade; senao, converte
+            // acertos (0..10) em pontos proporcionais ao que sobra depois dos TDEs.
             if (a.faltouAV1) empurraTxt(pos.avG1, "Faltou");
+            else if (a.notaAV1Manual != null) empurraNum(pos.avG1, num(a.notaAV1Manual));
             else if (a.acertosAV1 != null) {
               const pontosAV1 = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
               empurraNum(pos.avG1, Math.round(Number(a.acertosAV1) * pontosAV1 / 10 * 100) / 100);
@@ -537,7 +540,10 @@ async function renderTurmas() {
           if (!idxG1.length) return null;
           const totalTdes = idxG1.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
           const pontosAV = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
-          const av = a.faltouAV1 ? 0 : (a.acertosAV1 != null ? Math.round(Number(a.acertosAV1) * pontosAV / 10 * 100) / 100 : 0);
+          const av = a.faltouAV1 ? 0
+                    : a.notaAV1Manual != null ? Number(a.notaAV1Manual)
+                    : a.acertosAV1 != null ? Math.round(Number(a.acertosAV1) * pontosAV / 10 * 100) / 100
+                    : 0;
           return totalTdes + av;
         };
         const gFinalG2 = (a) => {
@@ -760,20 +766,43 @@ async function renderTurmaDetalhe() {
         <button class="btn subtle" id="btn-add-alunos">+ Adicionar</button>
         <div class="divider">
           ${alunos.length === 0 ? `<div class="muted" style="font-size:13px;">Nenhum aluno matriculado ainda.</div>` : ""}
-          ${alunos.map((a, i) => `
+          ${alunos.map((a, i) => {
+            // Modo da AV1 por aluno — padrao "acertos" (como era), mas se o professor ja digitou
+            // uma nota manual (notaAV1Manual), abre direto no modo "nota direta". Faltou vale
+            // nos dois modos.
+            const modoManual = a.notaAV1Manual != null;
+            const modo = modoManual ? "manual" : "acertos";
+            const inputAcertos = `
+              <input data-nota-av="acertosAV1" data-aluno="${a.id}" type="text" inputmode="decimal"
+                     value="${a.faltouAV1 ? "Faltou" : (a.acertosAV1 ?? "")}" placeholder="—"
+                     style="width:62px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center; ${modo==="acertos"?"":"display:none;"}"
+                     title="Quantas das 10 questões o aluno acertou (0 a 10, aceita meios). Digite &quot;Faltou&quot; se ele não compareceu." />
+              <span data-sufixo-av1="${a.id}" style="color:var(--ink-faint); font-size:10px; ${modo==="acertos"?"":"display:none;"}">/10</span>`;
+            const inputManual = `
+              <input data-nota-av="notaAV1Manual" data-aluno="${a.id}" type="text" inputmode="decimal"
+                     value="${a.faltouAV1 ? "Faltou" : (a.notaAV1Manual ?? "")}" placeholder="—"
+                     style="width:62px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center; ${modo==="manual"?"":"display:none;"}"
+                     title="Nota da AV1 digitada direto (0 a 10). Use este modo se quiser lançar a nota final sem calcular por acertos. Digite &quot;Faltou&quot; se ele não compareceu." />`;
+            return `
             <div class="row" style="padding:8px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}; align-items:center; flex-wrap:wrap; gap:8px;">
               <span style="font-size:13px; flex:1 1 220px;">${a.nome} <span class="mono muted" style="font-size:11px;">— matrícula ${a.matricula}</span></span>
               <div style="display:flex; align-items:center; gap:6px; font-size:11px;">
-                <label style="color:var(--ink-faint);" title="Quantas das 10 questões da AV1 o aluno acertou. A nota sai de acertos × (10 - soma dos TDEs da G1) / 10.">Acertos AV1</label>
-                <input data-nota-av="acertosAV1" data-aluno="${a.id}" type="text" inputmode="decimal" value="${a.faltouAV1 ? "Faltou" : (a.acertosAV1 ?? "")}" placeholder="—" style="width:62px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Quantas das 10 questões o aluno acertou (0 a 10, aceita meios). Digite &quot;Faltou&quot; se ele não compareceu." />
-                <span style="color:var(--ink-faint); font-size:10px;">/10</span>
+                <label data-rotulo-av1="${a.id}" style="color:var(--ink-faint);" title="Clique no botão ao lado pra alternar entre contar acertos (10 questões) ou digitar a nota direto.">${modo==="acertos"?"Acertos AV1":"Nota AV1"}</label>
+                ${inputAcertos}
+                ${inputManual}
+                <button type="button" class="btn subtle" data-alternar-av1="${a.id}" data-modo="${modo}"
+                        style="padding:2px 7px; font-size:10px; line-height:1.3;"
+                        title="Alternar entre contar acertos (0..10) e digitar a nota direta (0..10). Troca sem perder &quot;Faltou&quot;.">
+                  ${modo==="acertos"?"usar nota direta":"usar acertos"}
+                </button>
                 <label style="color:var(--ink-faint); margin-left:10px;" title="Nota direta da AV2 (0 a 10). Discursiva, pesos variáveis — você digita a nota final já calculada.">Nota AV2</label>
                 <input data-nota-av="notaAV2" data-aluno="${a.id}" type="number" step="0.1" min="0" max="10" value="${a.notaAV2 ?? ""}" placeholder="—" style="width:60px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G2 (0 a 10)" />
                 <span id="erro-av-${a.id}" class="mono" style="color:var(--red); font-size:10px;"></span>
               </div>
               <button class="btn danger" style="padding:4px 8px; font-size:11px;" data-remover-aluno="${a.id}">Remover</button>
             </div>
-          `).join("")}
+          `;
+          }).join("")}
         </div>
       </div>
 
@@ -932,8 +961,9 @@ async function renderTurmaDetalhe() {
       try {
         const bruto = el.value.trim();
         let valor;
+        const ehAV1 = (campo === "acertosAV1" || campo === "notaAV1Manual");
         if (bruto === "") valor = null;
-        else if (campo === "acertosAV1" && /^faltou$/i.test(bruto)) {
+        else if (ehAV1 && /^faltou$/i.test(bruto)) {
           valor = "Faltou"; el.value = "Faltou";
         } else {
           valor = Number(bruto.replace(",", "."));
@@ -945,6 +975,34 @@ async function renderTurmaDetalhe() {
         erroEl.textContent = e.message;
         el.value = el.dataset.prev;
       }
+    });
+  });
+
+  // Alterna o modo de lançamento da AV1 por aluno: "acertos" (default, vira nota) <-> "manual"
+  // (nota digitada direto). So mostra/esconde os inputs — a nota so eh salva quando o professor
+  // digita e sai do campo. Trocar de modo nao apaga nada por si so; o backend limpa o campo
+  // concorrente quando o novo valor eh salvo.
+  content.querySelectorAll("[data-alternar-av1]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const alunoId = btn.dataset.alternarAv1;
+      const modoAtual = btn.dataset.modo;
+      const novoModo = modoAtual === "acertos" ? "manual" : "acertos";
+      const inputAc = content.querySelector(`[data-nota-av="acertosAV1"][data-aluno="${alunoId}"]`);
+      const inputMn = content.querySelector(`[data-nota-av="notaAV1Manual"][data-aluno="${alunoId}"]`);
+      const sufixo  = content.querySelector(`[data-sufixo-av1="${alunoId}"]`);
+      const rotulo  = content.querySelector(`[data-rotulo-av1="${alunoId}"]`);
+      if (novoModo === "acertos") {
+        inputAc.style.display = ""; sufixo.style.display = ""; inputMn.style.display = "none";
+        if (rotulo) rotulo.textContent = "Acertos AV1";
+        btn.textContent = "usar nota direta";
+        inputAc.focus();
+      } else {
+        inputMn.style.display = ""; inputAc.style.display = "none"; sufixo.style.display = "none";
+        if (rotulo) rotulo.textContent = "Nota AV1";
+        btn.textContent = "usar acertos";
+        inputMn.focus();
+      }
+      btn.dataset.modo = novoModo;
     });
   });
 
