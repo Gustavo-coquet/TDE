@@ -226,7 +226,13 @@ function renderInstrucoes() {
         <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
         <div style="font-weight:600; font-size:15px; margin-bottom:4px;">${p.tituloProva}</div>
         <div class="muted" style="font-size:12.5px; margin-bottom:10px;">Tentativa ${p.tentativa} de no máximo 2</div>
-        <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Este TDE tem</span><span>${p.questoes.length} questões</span></div>
+        <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Este TDE tem</span><span>${(() => {
+          const nPag = paginasDa(p.questoes).length;
+          const temBloco = nPag !== p.questoes.length;
+          return temBloco
+            ? `${nPag} questões <span class="muted" style="font-size:11px;">(algumas com várias partes)</span>`
+            : `${nPag} questões`;
+        })()}</span></div>
         <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">e vale</span><span style="color:var(--teal); font-weight:600;">${formatarBR(p.valor)} pontos</span></div>
         <div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Matrícula</span><span class="mono" style="color:var(--teal);">${p.modoProfessor ? "modo professor" : token}</span></div>
         ${p.prazoFinal ? `<div class="row" style="font-size:13px; padding:6px 0; border-top:1px solid var(--line-faint);"><span class="muted">Prazo final</span><span>${new Date(p.prazoFinal).toLocaleString("pt-BR")}</span></div>` : ""}
@@ -307,20 +313,28 @@ function renderProva() {
     <div class="row" style="margin-bottom:10px;">
       <span class="mono muted" style="font-size:12px;">${
         bloco
-          ? `BLOCO · QUESTÕES ${numero(pg.questoes[0])} A ${numero(pg.questoes[pg.questoes.length - 1])} DE ${p.questoes.length}`
-          : `QUESTÃO ${numero(pg.questoes[0])} / ${p.questoes.length}`
+          ? `QUESTÃO ${state.atual + 1} / ${paginas.length} · ${pg.questoes.length} PARTES`
+          : `QUESTÃO ${state.atual + 1} / ${paginas.length}`
       }</span>
       <span class="mono muted" style="font-size:11px;">Tentativa ${p.tentativa}</span>
     </div>
 
     <div class="progress-track">
-      ${p.questoes
-        .map(
-          (qq) =>
-            `<div class="progress-seg ${
-              state.respostas[qq.id] ? "answered" : paginaDe.get(qq.id) === state.atual ? "current" : ""
-            }" data-jump="${paginaDe.get(qq.id)}" data-qid="${qq.id}"></div>`
-        )
+      ${paginas
+        .map((pag, idx) => {
+          const todasRespondidas = pag.questoes.every((q) => state.respostas[q.id]);
+          const algumaRespondida = pag.questoes.some((q) => state.respostas[q.id]);
+          const classe = todasRespondidas
+            ? "answered"
+            : idx === state.atual
+            ? "current"
+            : algumaRespondida
+            ? "partial"
+            : "";
+          return `<div class="progress-seg ${classe}" data-jump="${idx}" title="Questão ${idx + 1}${
+            pag.questoes.length > 1 ? ` (${pag.questoes.length} partes)` : ""
+          }"></div>`;
+        })
         .join("")}
     </div>
     <div class="muted" style="font-size:11px; margin-bottom:14px;">💾 Suas respostas são salvas automaticamente. Pode pular questões e sair a qualquer momento — depois é só voltar com o mesmo link.${

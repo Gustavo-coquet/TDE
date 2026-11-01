@@ -146,6 +146,7 @@ h1 { font-family: var(--f-display); font-size: 26px; font-weight: 600; margin: 0
 .progress-track { display: flex; gap: 4px; margin: 10px 0; }
 .progress-seg { flex: 1; height: 4px; background: var(--line-faint); cursor: pointer; }
 .progress-seg.answered { background: var(--teal); }
+.progress-seg.partial { background: linear-gradient(90deg, var(--teal) 50%, var(--line-faint) 50%); }
 .progress-seg.current { background: var(--ink-faint); }
 
 .spinner { color: var(--ink-faint); font-family: var(--f-mono); font-size: 13px; text-align: center; padding: 40px; }
