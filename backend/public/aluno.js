@@ -33,9 +33,19 @@ function formatarValorCampo(valor, campo) {
 
 // Aplica a formatação inline (**negrito**, ^{sup}, _{sub}) e escapa HTML por segurança.
 // Não mexe em quebras de linha — serve tanto pro enunciado quanto pra nomes/unidades das respostas.
+// Protege zonas de LaTeX ($$...$$ e $...$) pra que o KaTeX possa renderizar sem interferência:
+// o _{...} e ^{...} do LaTeX NÃO podem virar <sub>/<sup> antes do KaTeX, senão ele vê HTML
+// no meio e desiste. A gente guarda cada zona num placeholder, aplica os replaces no resto,
+// e depois devolve as zonas intactas (só com os caracteres HTML perigosos escapados).
 function formatarInline(texto) {
   if (!texto) return "";
-  return String(texto)
+  const zonas = [];
+  const token = (i) => `\u0001MATH${i}\u0001`;
+  // guarda $$...$$ primeiro (não gulose, não cruza linha vazia), depois $...$ (não gulose, mesma linha)
+  let s = String(texto)
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => { zonas.push({ display: true, body: m }); return token(zonas.length - 1); })
+    .replace(/\$([^\$\n]+?)\$/g,     (_, m) => { zonas.push({ display: false, body: m }); return token(zonas.length - 1); });
+  s = s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -43,12 +53,22 @@ function formatarInline(texto) {
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/\^\{(.+?)\}/g, "<sup>$1</sup>")
     .replace(/_\{(.+?)\}/g, "<sub>$1</sub>");
+  // devolve as zonas de math como texto bruto, só escapando & < > " (o KaTeX precisa de \ { } $ intactos)
+  const escMath = (m) => m.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s.replace(/\u0001MATH(\d+)\u0001/g, (_, i) => {
+    const z = zonas[+i];
+    return z.display ? `$$${escMath(z.body)}$$` : `$${escMath(z.body)}$`;
+  });
 }
 
 // Remove as marcações sem virar HTML — usado no PDF, que não entende tags.
+// Também desembala $$...$$ e $...$ (mantém o conteúdo LaTeX como texto puro), já que o
+// jsPDF não renderiza equações. Pelo menos o aluno continua enxergando os símbolos.
 function limparMarcacoes(texto) {
   if (!texto) return "";
   return String(texto)
+    .replace(/\$\$([\s\S]+?)\$\$/g, "$1")
+    .replace(/\$([^\$\n]+?)\$/g, "$1")
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/\^\{(.+?)\}/g, "$1")
     .replace(/_\{(.+?)\}/g, "$1");
