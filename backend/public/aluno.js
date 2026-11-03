@@ -60,6 +60,29 @@ function formatarEnunciado(texto) {
   return formatarInline(texto).replace(/\n/g, "<br>");
 }
 
+// Renderiza equações LaTeX entre $...$ (inline) e $$...$$ (display) usando KaTeX.
+// Chamar depois de qualquer content.innerHTML = ... que mostre enunciado/alternativas.
+// Se o KaTeX ainda não carregou (CDN lenta na 1ª visita), tenta de novo em 100ms, até 10x.
+function renderMath(el, tentativa = 0) {
+  const alvo = el || content;
+  if (window.renderMathInElement) {
+    try {
+      window.renderMathInElement(alvo, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$",  right: "$",  display: false },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "\\[", right: "\\]", display: true },
+        ],
+        throwOnError: false,
+        strict: "ignore",
+      });
+    } catch (e) { console.warn("KaTeX falhou:", e); }
+  } else if (tentativa < 10) {
+    setTimeout(() => renderMath(alvo, tentativa + 1), 100);
+  }
+}
+
 // monta o texto de uma alternativa; se a questão tiver um "formatoResposta" customizado
 // (ex.: "F = ({Fx}î + {Fz}k̂) N"), usa ele SÓ pros campos que ele referencia — outros campos
 // marcados como "é resposta" que não aparecem no formato continuam mostrados do jeito padrão, do lado.
@@ -384,6 +407,10 @@ function renderProva() {
       </div>
     </div>
   `;
+
+  // Renderiza equações LaTeX ($...$ / $$...$$) com KaTeX depois que o HTML do enunciado
+  // e das alternativas foi inserido.
+  renderMath(content);
 
   // Marcar uma alternativa NÃO redesenha a página. Numa página de bloco, redesenhar fazia o
   // aluno perder o lugar do scroll (a imagem some e volta, a página encolhe e o navegador
