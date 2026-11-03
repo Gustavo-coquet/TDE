@@ -620,4 +620,23 @@ function gerarPDF(r) {
   doc.save(nomeArquivo);
 }
 
+// Observa o #content e roda o KaTeX sempre que o HTML muda — redundante com o renderMath()
+// no final de renderProva() mas garante que as outras telas (resultado, pausa, erro) também
+// renderizem equações se elas tiverem $...$ no enunciado.
+(function ligarKaTeXAutomatico() {
+  if (!content) return;
+  let pendente = false;
+  const config = { childList: true, subtree: true, characterData: true };
+  const observer = new MutationObserver(() => {
+    if (pendente) return;
+    pendente = true;
+    requestAnimationFrame(() => {
+      pendente = false;
+      observer.disconnect();
+      try { renderMath(content); } finally { observer.observe(content, config); }
+    });
+  });
+  observer.observe(content, config);
+})();
+
 iniciar();

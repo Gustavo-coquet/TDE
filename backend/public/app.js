@@ -278,10 +278,16 @@ function formatarValorCampo(valor, campo) {
 }
 
 // Aplica a formatação inline (**negrito**, ^{sup}, _{sub}) e escapa HTML por segurança.
-// Não mexe em quebras de linha — serve tanto pro enunciado quanto pra nomes/unidades das respostas.
+// Protege zonas de LaTeX ($$...$$ e $...$) pra o KaTeX conseguir renderizar depois sem
+// interferência — _{...} e ^{...} do LaTeX NÃO podem virar <sub>/<sup> antes do KaTeX.
 function formatarInline(texto) {
   if (!texto) return "";
-  return String(texto)
+  const zonas = [];
+  const token = (i) => `\u0001MATH${i}\u0001`;
+  let s = String(texto)
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => { zonas.push({ display: true, body: m }); return token(zonas.length - 1); })
+    .replace(/\$([^\$\n]+?)\$/g,     (_, m) => { zonas.push({ display: false, body: m }); return token(zonas.length - 1); });
+  s = s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -289,12 +295,20 @@ function formatarInline(texto) {
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/\^\{(.+?)\}/g, "<sup>$1</sup>")
     .replace(/_\{(.+?)\}/g, "<sub>$1</sub>");
+  const escMath = (m) => m.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s.replace(/\u0001MATH(\d+)\u0001/g, (_, i) => {
+    const z = zonas[+i];
+    return z.display ? `$$${escMath(z.body)}$$` : `$${escMath(z.body)}$`;
+  });
 }
 
 // Remove as marcações sem virar HTML — usado no PDF, que não entende tags.
+// Desembala $$...$$ e $...$ mantendo só o conteúdo LaTeX como texto puro.
 function limparMarcacoes(texto) {
   if (!texto) return "";
   return String(texto)
+    .replace(/\$\$([\s\S]+?)\$\$/g, "$1")
+    .replace(/\$([^\$\n]+?)\$/g, "$1")
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/\^\{(.+?)\}/g, "$1")
     .replace(/_\{(.+?)\}/g, "$1");
@@ -304,6 +318,30 @@ function limparMarcacoes(texto) {
 function formatarEnunciado(texto) {
   if (!texto) return "";
   return formatarInline(texto).replace(/\n/g, "<br>");
+}
+
+// Renderiza equações LaTeX entre $...$ (inline) e $$...$$ (display) via KaTeX.
+// Chame depois de qualquer content.innerHTML = ... que mostre enunciado/alternativas.
+// Se o KaTeX ainda não carregou (CDN lenta na 1ª visita), tenta de novo em 100ms, até 10x.
+function renderMath(el, tentativa = 0) {
+  const alvo = el || document.getElementById("content");
+  if (!alvo) return;
+  if (window.renderMathInElement) {
+    try {
+      window.renderMathInElement(alvo, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$",  right: "$",  display: false },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "\\[", right: "\\]", display: true },
+        ],
+        throwOnError: false,
+        strict: "ignore",
+      });
+    } catch (e) { console.warn("KaTeX falhou:", e); }
+  } else if (tentativa < 10) {
+    setTimeout(() => renderMath(alvo, tentativa + 1), 100);
+  }
 }
 
 async function api(path, options) {
@@ -2325,5 +2363,25 @@ async function renderResultados() {
     XLSX.writeFile(wb, nomeArquivo);
   });
 }
+
+// Observa o #content e roda o KaTeX sempre que o HTML muda — assim não precisa chamar
+// renderMath() manualmente em cada um dos ~15 pontos do app que alteram content.innerHTML.
+// Desconecta o observer enquanto o KaTeX modifica o DOM, pra não entrar em loop infinito.
+(function ligarKaTeXAutomatico() {
+  const alvo = document.getElementById("content");
+  if (!alvo) return;
+  let pendente = false;
+  const config = { childList: true, subtree: true, characterData: true };
+  const observer = new MutationObserver(() => {
+    if (pendente) return;
+    pendente = true;
+    requestAnimationFrame(() => {
+      pendente = false;
+      observer.disconnect();
+      try { renderMath(alvo); } finally { observer.observe(alvo, config); }
+    });
+  });
+  observer.observe(alvo, config);
+})();
 
 render();
