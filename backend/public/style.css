@@ -172,7 +172,9 @@ sup, sub { font-size: 0.72em; line-height: 0; position: relative; vertical-align
 sup { top: -0.5em; }
 sub { bottom: -0.28em; }
 
-/* Edição inline do assunto na lista do Banco — clica, digita, Enter salva. */
+/* Edição inline do assunto na lista do Banco — clica, digita, Enter salva.
+   display:inline (não inline-block!) pra NÃO contribuir pro min-content da coluna de grade,
+   que estava espremendo a aba de preview ao lado quando um card tinha conteúdo largo. */
 .edit-assunto {
   cursor: text;
   padding: 1px 4px;
@@ -180,9 +182,19 @@ sub { bottom: -0.28em; }
   border-radius: 2px;
   border: 1px dashed transparent;
   transition: border-color .15s, background .15s;
-  display: inline-block;
-  min-width: 40px;
   outline: none;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .edit-assunto:hover { border-color: var(--line); background: rgba(255,255,255,.03); }
 .edit-assunto:focus { border-color: var(--teal); background: rgba(79,209,197,.08); cursor: text; }
+
+/* Enunciados dentro de cards do Banco podem ter strings longas sem espaço (base64 de imagem,
+   subscritos encostados sem quebra). Força o wrap pra elas não empurrarem a coluna da grade. */
+.card { overflow-wrap: break-word; word-wrap: break-word; }
+.card .mono { overflow-wrap: break-word; word-break: break-word; min-width: 0; }
+
+/* Layout duas colunas (Banco de Questões): sem isso, o min-content do conteúdo da
+   coluna esquerda vaza pra direita e o painel de preview vira uma coluna de 50px.
+   minmax(0, 1fr) autoriza a coluna a encolher menos que seu min-content. */
+.grid-banco-2col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }

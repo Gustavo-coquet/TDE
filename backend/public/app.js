@@ -1309,8 +1309,8 @@ async function renderBanco(mostrarForm) {
     </div>
     ${mostrarForm ? `<div id="form-questao" style="margin-bottom:18px;"></div>` : ""}
     ${renderBarraFiltro("banco", questoes, state.filtroBanco)}
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start;">
-      <div>
+    <div class="grid-banco-2col">
+      <div style="min-width:0;">
         <div class="mono muted" style="font-size:11px; margin-bottom:8px;">${filtradas.length} de ${questoes.length} questões</div>
         ${(() => {
           const lista = blocosDe(filtradas, questoes);
