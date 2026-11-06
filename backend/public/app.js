@@ -153,6 +153,16 @@ function molduraBloco(b, ativo, dentro, clicavel, cor, comApagar = false) {
   const c = (cor || PALETA_BLOCO[0]).rgb;
   // miniatura da figura do bloco, pra reconhecer de relance qual viga/peça é
   const fig = b.questoes.map((q) => q.imagem).find(Boolean);
+  // No Banco (comApagar=true), a 1ª questão do bloco dá o "assunto" compartilhado por todas
+  // e é editável inline: clique → digite → Enter (ou clique fora) salva no bloco inteiro.
+  const q0 = b.questoes[0];
+  const assuntoEditavel = (comApagar && q0) ? `
+          <div class="mono" style="font-size:11px; margin-top:4px; color:rgba(${c},.55);">ASSUNTO (todas do bloco)</div>
+          <div style="font-size:13.5px; font-weight:600; margin-top:1px;">
+            <span class="edit-assunto" contenteditable="plaintext-only" spellcheck="false"
+                  data-edit-assunto="${q0.id}" data-original="${attr(q0.assunto)}"
+                  title="Clique pra editar · Enter salva · Esc cancela">${attr(q0.assunto)}</span>
+          </div>` : "";
   return `
     <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid rgba(${c},${ativo ? ".55" : ".35"});
          border-left:4px solid rgba(${c},${ativo ? "1" : ".6"});
@@ -168,6 +178,7 @@ function molduraBloco(b, ativo, dentro, clicavel, cor, comApagar = false) {
           <div class="mono" style="font-size:11px; margin-top:2px; color:rgba(${c},.72);">
             ${b.questoes.length} questões — mesmos valores sorteados, entram e saem juntas
           </div>
+          ${assuntoEditavel}
         </div>
         ${fig ? `<img src="${fig}" alt="figura do bloco" style="flex-shrink:0; max-height:110px; max-width:280px; width:auto; height:auto; background:#fff; border:1px solid rgba(${c},.5);" />` : ""}
         ${comApagar ? `<button class="btn danger" style="font-size:10.5px; padding:3px 8px; flex-shrink:0;" data-apagar-bloco="${attr(b.grupo)}" data-qtd="${b.questoes.length}">Apagar bloco</button>` : ""}
@@ -1311,7 +1322,13 @@ async function renderBanco(mostrarForm) {
             <div class="row">
               <div>
                 ${dentro ? "" : `<span class="pill" style="margin-bottom:6px;">${q.disciplina}</span>`}
-                <div style="font-weight:600; font-size:13.5px; margin-top:${dentro ? "0" : "6px"};">${dentro ? rotuloRespostas(q) : q.assunto}</div>
+                <div style="font-weight:600; font-size:13.5px; margin-top:${dentro ? "0" : "6px"};">
+                  ${dentro
+                    ? rotuloRespostas(q)
+                    : `<span class="edit-assunto" contenteditable="plaintext-only" spellcheck="false"
+                             data-edit-assunto="${q.id}" data-original="${attr(q.assunto)}"
+                             title="Clique pra editar · Enter salva · Esc cancela">${attr(q.assunto)}</span>`}
+                </div>
               </div>
               <div class="dots">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
             </div>
@@ -1358,6 +1375,45 @@ async function renderBanco(mostrarForm) {
         alert("Erro ao apagar o bloco: " + e.message);
         el.disabled = false;
         el.textContent = "Apagar bloco";
+      }
+    });
+  });
+
+  // Edição inline do "assunto" direto no card/moldura — sem precisar abrir o editor completo.
+  // Clica no texto, digita, Enter (ou clique fora) salva; Esc cancela. Se a questão faz parte
+  // de um bloco encadeado, o PATCH do backend propaga a mudança pras irmãs automaticamente.
+  content.querySelectorAll("[data-edit-assunto]").forEach((el) => {
+    // Clicar no span NÃO deve abrir o preview da questão (o card inteiro é clicável).
+    el.addEventListener("click", (ev) => ev.stopPropagation());
+    el.addEventListener("mousedown", (ev) => ev.stopPropagation());
+
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); el.blur(); }
+      if (ev.key === "Escape") { el.textContent = el.dataset.original || ""; el.blur(); }
+    });
+
+    el.addEventListener("blur", async () => {
+      const novo = el.textContent.trim();
+      const antigo = (el.dataset.original || "").trim();
+      if (!novo) { el.textContent = antigo; return; } // vazio → desfaz
+      if (novo === antigo) return;                    // sem mudança → nada a fazer
+      const qid = el.dataset.editAssunto;
+      el.style.opacity = "0.5";
+      try {
+        const r = await api(`/questoes/${qid}`, { method: "PATCH", body: JSON.stringify({ assunto: novo }) });
+        el.dataset.original = novo;
+        // Atualiza o cache local pra outros cards do mesmo bloco refletirem na hora, sem rerender.
+        state.questoes.forEach((q) => {
+          if (q.id === qid || (r.grupoVariaveis && q.grupoVariaveis === r.grupoVariaveis)) q.assunto = novo;
+        });
+        // Marca visualmente "salvo" por 0,8s.
+        el.style.outline = "1px solid var(--teal)";
+        setTimeout(() => { el.style.outline = ""; }, 800);
+      } catch (e) {
+        alert("Não consegui salvar o assunto: " + e.message);
+        el.textContent = antigo;
+      } finally {
+        el.style.opacity = "";
       }
     });
   });

@@ -137,6 +137,36 @@ questoesRouter.put("/:id", asyncHandler(async (req, res) => {
   res.json({ ...questao, irmasAtualizadas });
 }));
 
+// PATCH /api/questoes/:id -> edição leve de poucos campos (ex.: apenas "assunto")
+// Diferente do PUT, aceita um body parcial e NÃO precisa revalidar fórmulas.
+// Campos aceitos (todos opcionais): disciplina, assunto, dificuldade.
+// Se a questão pertence a um bloco encadeado, a mudança propaga para as irmãs
+// (bloco inteiro compartilha disciplina/assunto/dificuldade), igual ao PUT.
+questoesRouter.patch("/:id", asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const data: any = {};
+  if (typeof req.body.disciplina === "string" && req.body.disciplina.trim()) data.disciplina = req.body.disciplina.trim();
+  if (typeof req.body.assunto === "string" && req.body.assunto.trim()) data.assunto = req.body.assunto.trim();
+  if (req.body.dificuldade !== undefined) {
+    const d = Number(req.body.dificuldade);
+    if (Number.isFinite(d) && d >= 1 && d <= 5) data.dificuldade = Math.round(d);
+  }
+  if (Object.keys(data).length === 0) return res.status(400).json({ erro: "Nenhum campo válido para atualizar." });
+
+  const questao = await prisma.questao.update({ where: { id }, data });
+
+  let irmasAtualizadas = 0;
+  if (questao.grupoVariaveis) {
+    const r = await prisma.questao.updateMany({
+      where: { grupoVariaveis: questao.grupoVariaveis, id: { not: questao.id } },
+      data,
+    });
+    irmasAtualizadas = r.count;
+  }
+
+  res.json({ ...questao, irmasAtualizadas });
+}));
+
 // DELETE /api/questoes/bloco/:grupo -> apaga TODAS as questões de um bloco encadeado de uma vez.
 // Tudo ou nada: se alguma questão do bloco estiver em algum TDE, não apaga nenhuma e diz em quais.
 questoesRouter.delete("/bloco/:grupo", asyncHandler(async (req, res) => {
