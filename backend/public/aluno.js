@@ -441,18 +441,25 @@ function renderProva() {
     <div class="progress-track">
       ${paginas
         .map((pag, idx) => {
-          const todasRespondidas = pag.questoes.every((q) => state.respostas[q.id]);
-          const algumaRespondida = pag.questoes.some((q) => state.respostas[q.id]);
-          const classe = todasRespondidas
+          // "answered" (verde) só quando o servidor CONFIRMOU todas as respostas da página.
+          // Marcação local sem confirmação fica como "partial" (cinza-amarelado), pra o
+          // aluno ver que faltou algo. Assim a barra verde é promessa de que tá salvo.
+          const salvas = state.respostasSalvas || {};
+          const marcadas = state.respostas || {};
+          const todasSalvas = pag.questoes.every((q) => salvas[q.id]);
+          const algumaSalvaOuMarcada = pag.questoes.some((q) => salvas[q.id] || marcadas[q.id]);
+          const todasMarcadas = pag.questoes.every((q) => marcadas[q.id]);
+          const classe = todasSalvas
             ? "answered"
             : idx === state.atual
             ? "current"
-            : algumaRespondida
+            : todasMarcadas
+            ? "partial pendente-salvar"
+            : algumaSalvaOuMarcada
             ? "partial"
             : "";
-          return `<div class="progress-seg ${classe}" data-jump="${idx}" title="Questão ${idx + 1}${
-            pag.questoes.length > 1 ? ` (${pag.questoes.length} partes)` : ""
-          }"></div>`;
+          const titulo = `Questão ${idx + 1}${pag.questoes.length > 1 ? ` (${pag.questoes.length} partes)` : ""} — clique para ir`;
+          return `<div class="progress-seg ${classe}" data-jump="${idx}" data-seg-idx="${idx}" style="cursor:pointer;" title="${titulo}"></div>`;
         })
         .join("")}
     </div>
@@ -551,6 +558,7 @@ function renderProva() {
           state.respostasSalvas = state.respostasSalvas || {};
           state.respostasSalvas[questaoId] = letra;
           marcarStatus("respondida ✓", "var(--teal)");
+          atualizarBarraProgresso();
         } catch (e) {
           if (tent < 2) {
             await new Promise((r) => setTimeout(r, 600 * (tent + 1)));
@@ -559,6 +567,7 @@ function renderProva() {
           console.error("Falha ao salvar resposta:", e.message);
           marcarStatus("NÃO SALVA — clique de novo", "var(--red)");
           mostrarAvisoSalvamento();
+          atualizarBarraProgresso();
         } finally {
           state.salvandoPendente = Math.max(0, (state.salvandoPendente || 1) - 1);
         }
@@ -566,6 +575,26 @@ function renderProva() {
       await salvar(0);
     });
   });
+
+  // Reaplica a classe de cada segmento da barra sem redesenhar a página inteira
+  // (pra não perder o scroll do aluno).
+  function atualizarBarraProgresso() {
+    const salvas = state.respostasSalvas || {};
+    const marcadas = state.respostas || {};
+    document.querySelectorAll(".progress-seg[data-seg-idx]").forEach((seg) => {
+      const i = Number(seg.dataset.segIdx);
+      const pag = paginas[i];
+      if (!pag) return;
+      const todasSalvas = pag.questoes.every((q) => salvas[q.id]);
+      const todasMarcadas = pag.questoes.every((q) => marcadas[q.id]);
+      const algumaMarc = pag.questoes.some((q) => salvas[q.id] || marcadas[q.id]);
+      seg.classList.remove("answered", "current", "partial", "pendente-salvar");
+      if (todasSalvas) seg.classList.add("answered");
+      else if (i === state.atual) seg.classList.add("current");
+      else if (todasMarcadas) { seg.classList.add("partial"); seg.classList.add("pendente-salvar"); }
+      else if (algumaMarc) seg.classList.add("partial");
+    });
+  }
 
   content.querySelectorAll("[data-jump]").forEach((el) => {
     el.addEventListener("click", () => { state.atual = Number(el.dataset.jump); renderProva(); window.scrollTo(0, 0); });
@@ -639,20 +668,59 @@ async function finalizar() {
     return;
   }
 
-  // 3) Checagem leve: alguma letra marcada localmente que ainda não foi confirmada como salva?
+  // 3) BLOQUEIO: qualquer resposta marcada localmente que não foi confirmada como salva no
+  // servidor é considerada perdida. Tenta re-salvar automaticamente; se ainda falhar, NÃO
+  // deixa finalizar — resposta não salva vira "errou" no PDF, e isso não pode acontecer.
+  state.respostasSalvas = state.respostasSalvas || {};
   const naoConfirmadas = p.questoes.filter((q) => {
     const marcada = state.respostas[q.id];
-    const salva = state.respostasSalvas && state.respostasSalvas[q.id];
+    const salva = state.respostasSalvas[q.id];
     return marcada && salva !== marcada;
   });
   if (naoConfirmadas.length > 0) {
-    const nums = naoConfirmadas.map((q) => numeroDe(q)).join(", ");
-    const ok = confirm(
-      `Atenção: ${naoConfirmadas.length} ${naoConfirmadas.length === 1 ? "resposta pode não ter sido salva" : "respostas podem não ter sido salvas"} no servidor (${nums}).\n\n` +
-      `Recomendamos voltar e clicar de novo na alternativa dessas questões.\n\n` +
-      `Deseja finalizar mesmo assim?`
-    );
-    if (!ok) return;
+    const btnFim = document.getElementById("btn-finalizar");
+    if (btnFim) { btnFim.disabled = true; btnFim.textContent = "Salvando respostas pendentes…"; }
+    // Tenta salvar cada uma, em sequência, com retry
+    const aindaFalham = [];
+    for (const q of naoConfirmadas) {
+      const letra = state.respostas[q.id];
+      let sucesso = false;
+      for (let tent = 0; tent < 3 && !sucesso; tent++) {
+        try {
+          await api(`/prova/${provaMestreId}/${encodeURIComponent(token)}/responder`, {
+            method: "POST",
+            body: JSON.stringify({ provaIndividualQuestaoId: q.id, letra }),
+          });
+          state.respostasSalvas[q.id] = letra;
+          sucesso = true;
+        } catch (e) {
+          await new Promise((r) => setTimeout(r, 500 * (tent + 1)));
+        }
+      }
+      if (!sucesso) aindaFalham.push(q);
+    }
+    if (btnFim) { btnFim.disabled = false; btnFim.textContent = "✓ Finalizar prova"; }
+    // Atualiza visualmente os segmentos que acabaram de confirmar salvamento
+    document.querySelectorAll(".progress-seg[data-seg-idx]").forEach((seg) => {
+      const i = Number(seg.dataset.segIdx);
+      const paginas = paginasDa(p.questoes);
+      const pag = paginas[i];
+      if (!pag) return;
+      if (pag.questoes.every((q) => state.respostasSalvas[q.id])) {
+        seg.classList.remove("current", "partial", "pendente-salvar");
+        seg.classList.add("answered");
+      }
+    });
+
+    if (aindaFalham.length > 0) {
+      const nums = aindaFalham.map((q) => numeroDe(q)).join(", ");
+      alert(
+        `Não conseguimos salvar as respostas das questões ${nums} no servidor.\n\n` +
+        `Isso quase sempre é problema de internet. Verifique sua conexão, atualize a página (F5) e tente de novo.\n\n` +
+        `Não vamos finalizar agora — se a gente finalizasse, essas questões contariam como erradas.`
+      );
+      return;
+    }
   }
 
   // 4) Confirmação final.
