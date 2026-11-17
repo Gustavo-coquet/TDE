@@ -61,17 +61,74 @@ function formatarInline(texto) {
   });
 }
 
+// Converte LaTeX puro para texto Unicode legível — usado no PDF, que não renderiza equações.
+// Expande \dfrac, \sqrt, \frac, operadores (\to, \cdot, \pm, \leq, ...), letras gregas e
+// \lim_{...}, deixando algo como "lim(x→0) (√(x+36)-6)/(x)" em vez do LaTeX cru.
+function latexParaTexto(s) {
+  if (!s) return "";
+  let t = String(s);
+  // \lim_{x \to 0} → "lim(x→0)"  (resolve ANTES de substituir \to)
+  t = t.replace(/\\lim\s*_\{([^{}]*)\}/g, (_, sub) => "lim(" + sub.trim() + ")");
+  t = t.replace(/\\lim\b/g, "lim");
+  // \displaystyle some
+  t = t.replace(/\\displaystyle\s*/g, "");
+  // \dfrac{A}{B} e \frac{A}{B} → "(A)/(B)" — aplica iterativamente p/ aninhamento
+  for (let i = 0; i < 6; i++) {
+    const antes = t;
+    t = t.replace(/\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
+    if (t === antes) break;
+  }
+  // \sqrt[n]{A} → "ⁿ√(A)";  \sqrt{A} → "√(A)"
+  t = t.replace(/\\sqrt\s*\[([^\]]*)\]\s*\{([^{}]*)\}/g, "$1√($2)");
+  for (let i = 0; i < 6; i++) {
+    const antes = t;
+    t = t.replace(/\\sqrt\s*\{([^{}]*)\}/g, "√($1)");
+    if (t === antes) break;
+  }
+  // Operadores e símbolos comuns
+  const mapa = {
+    "\\\\to": "→",   "\\\\rightarrow": "→", "\\\\leftarrow": "←",
+    "\\\\cdot": "·", "\\\\times": "×", "\\\\div": "÷",
+    "\\\\pm": "±",   "\\\\mp": "∓",
+    "\\\\leq": "≤",  "\\\\le": "≤", "\\\\geq": "≥", "\\\\ge": "≥",
+    "\\\\neq": "≠",  "\\\\ne": "≠", "\\\\approx": "≈", "\\\\equiv": "≡",
+    "\\\\infty": "∞", "\\\\partial": "∂", "\\\\nabla": "∇",
+    "\\\\int": "∫",  "\\\\sum": "∑", "\\\\prod": "∏",
+    "\\\\sin": "sen","\\\\cos": "cos", "\\\\tan": "tg",
+    "\\\\log": "log","\\\\ln": "ln", "\\\\exp": "exp",
+    "\\\\ldots": "…","\\\\cdots": "⋯", "\\\\dots": "…",
+    "\\\\left": "",  "\\\\right": "",
+    "\\\\,": " ",    "\\\\ ": " ", "\\\\!": "", "\\\\;": " ", "\\\\:": " ", "\\\\quad": "  ", "\\\\qquad": "    ",
+    // letras gregas comuns
+    "\\\\alpha": "α","\\\\beta": "β", "\\\\gamma": "γ", "\\\\delta": "δ",
+    "\\\\epsilon": "ε", "\\\\varepsilon": "ε",
+    "\\\\theta": "θ", "\\\\lambda": "λ", "\\\\mu": "μ", "\\\\pi": "π",
+    "\\\\rho": "ρ",   "\\\\sigma": "σ", "\\\\tau": "τ", "\\\\phi": "φ",
+    "\\\\omega": "ω",
+    "\\\\Delta": "Δ", "\\\\Pi": "Π", "\\\\Sigma": "Σ", "\\\\Omega": "Ω", "\\\\Theta": "Θ",
+  };
+  for (const [k, v] of Object.entries(mapa)) t = t.replace(new RegExp(k + "(?![a-zA-Z])", "g"), v);
+  // Subscritos/sobrescritos simples: _{abc} / ^{abc} / _a / ^a
+  t = t.replace(/\^\{([^{}]*)\}/g, "^($1)").replace(/_\{([^{}]*)\}/g, "_($1)");
+  t = t.replace(/\^([0-9a-zA-Z])/g, "^$1").replace(/_([0-9a-zA-Z])/g, "_$1");
+  // Remove chaves que sobraram (grupos sem comando)
+  t = t.replace(/\{([^{}]*)\}/g, "$1");
+  // Espaço antes e depois de operadores pra ficar legível
+  return t;
+}
+
 // Remove as marcações sem virar HTML — usado no PDF, que não entende tags.
-// Também desembala $$...$$ e $...$ (mantém o conteúdo LaTeX como texto puro), já que o
-// jsPDF não renderiza equações. Pelo menos o aluno continua enxergando os símbolos.
 function limparMarcacoes(texto) {
   if (!texto) return "";
-  return String(texto)
-    .replace(/\$\$([\s\S]+?)\$\$/g, "$1")
-    .replace(/\$([^\$\n]+?)\$/g, "$1")
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/\^\{(.+?)\}/g, "$1")
-    .replace(/_\{(.+?)\}/g, "$1");
+  let t = String(texto);
+  // Desembala $$...$$ e $...$ e aplica a conversão LaTeX → Unicode ao conteúdo deles
+  t = t.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => latexParaTexto(m));
+  t = t.replace(/\$([^\$\n]+?)\$/g, (_, m) => latexParaTexto(m));
+  // **negrito** vira texto cru
+  t = t.replace(/\*\*(.+?)\*\*/g, "$1");
+  // Converte LaTeX também em pedaços fora dos $...$ (ex.: textos com \to soltos)
+  t = latexParaTexto(t);
+  return t;
 }
 
 // Igual ao formatarInline, mas também converte as quebras de linha em <br> (o navegador as ignora por padrão).
@@ -199,7 +256,15 @@ async function carregarEstado() {
     if (dados.estado === "em_andamento") {
       state.prova = dados;
       state.respostas = {};
-      dados.questoes.forEach((q) => { if (q.respostaAlunoLetra) state.respostas[q.id] = q.respostaAlunoLetra; });
+      state.respostasSalvas = {};
+      state.salvandoPendente = 0;
+      dados.questoes.forEach((q) => {
+        if (q.respostaAlunoLetra) {
+          state.respostas[q.id] = q.respostaAlunoLetra;
+          // Veio do banco → já está salva
+          state.respostasSalvas[q.id] = q.respostaAlunoLetra;
+        }
+      });
       state.atual = 0;
       renderInstrucoes();
     } else {
@@ -240,6 +305,8 @@ function renderDecisao(dados) {
         const dadosNovos = await api(`/prova/${provaMestreId}/${encodeURIComponent(token)}/nova-tentativa`, { method: "POST" });
         state.prova = dadosNovos;
         state.respostas = {};
+        state.respostasSalvas = {};
+        state.salvandoPendente = 0;
         state.atual = 0;
         renderInstrucoes();
       } catch (e) {
@@ -455,14 +522,39 @@ function renderProva() {
         contador.textContent = `${n} de ${pg.questoes.length} respondidas`;
       }
 
-      try {
-        await api(`/prova/${provaMestreId}/${encodeURIComponent(token)}/responder`, {
-          method: "POST",
-          body: JSON.stringify({ provaIndividualQuestaoId: questaoId, letra }),
-        });
-      } catch (e) {
-        console.error("Falha ao salvar resposta:", e.message);
-      }
+      // Feedback visual: "salvando..." → "✓ salva" ou aviso de erro, e retry automático.
+      // Isso evita o caso "cliquei, sumi e o servidor nunca recebeu" que gerava reclamação.
+      const marcarStatus = (texto, cor) => {
+        if (!rot) return;
+        const base = `QUESTÃO ${rot.textContent.match(/QUESTÃO\s+(\S+)/)?.[1] || ""}`.trim();
+        rot.textContent = `${base} · ${texto}`;
+        rot.style.color = cor;
+      };
+      marcarStatus("salvando…", "var(--ink-faint)");
+      state.salvandoPendente = (state.salvandoPendente || 0) + 1;
+
+      const salvar = async (tent) => {
+        try {
+          await api(`/prova/${provaMestreId}/${encodeURIComponent(token)}/responder`, {
+            method: "POST",
+            body: JSON.stringify({ provaIndividualQuestaoId: questaoId, letra }),
+          });
+          state.respostasSalvas = state.respostasSalvas || {};
+          state.respostasSalvas[questaoId] = letra;
+          marcarStatus("respondida ✓", "var(--teal)");
+        } catch (e) {
+          if (tent < 2) {
+            await new Promise((r) => setTimeout(r, 600 * (tent + 1)));
+            return salvar(tent + 1);
+          }
+          console.error("Falha ao salvar resposta:", e.message);
+          marcarStatus("NÃO SALVA — clique de novo", "var(--red)");
+          mostrarAvisoSalvamento();
+        } finally {
+          state.salvandoPendente = Math.max(0, (state.salvandoPendente || 1) - 1);
+        }
+      };
+      await salvar(0);
     });
   });
 
@@ -498,7 +590,66 @@ function renderPausado() {
   document.getElementById("btn-continuar-respondendo").addEventListener("click", () => renderProva());
 }
 
+function mostrarAvisoSalvamento() {
+  let t = document.getElementById("toast-salvar");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "toast-salvar";
+    t.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#3a1414; color:#ffd7d7; border:1px solid #ff9c9c; padding:10px 16px; border-radius:8px; font-size:13px; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,.4);";
+    document.body.appendChild(t);
+  }
+  t.textContent = "⚠ Alguma resposta não foi salva no servidor. Clique de novo na alternativa antes de finalizar.";
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => { t.remove(); }, 6000);
+}
+
 async function finalizar() {
+  const p = state.prova;
+  if (!p || !p.questoes) return;
+
+  // 1) Bloqueio: toda questão precisa ter uma letra marcada.
+  const numeroDe = (q) => p.questoes.indexOf(q) + 1;
+  const semResposta = p.questoes.filter((q) => !state.respostas[q.id]);
+  if (semResposta.length > 0) {
+    const nums = semResposta.map((q) => numeroDe(q)).join(", ");
+    alert(
+      `Você ainda não respondeu ${semResposta.length} ${semResposta.length === 1 ? "questão" : "questões"}: ${nums}.\n\n` +
+      `Volte e marque uma alternativa em cada uma antes de finalizar.`
+    );
+    // Leva o aluno pra primeira questão sem resposta
+    const alvo = semResposta[0];
+    const paginas = paginasDa(p.questoes);
+    const pIdx = paginas.findIndex((pg) => pg.questoes.some((q) => q.id === alvo.id));
+    if (pIdx >= 0) { state.atual = pIdx; renderProva(); window.scrollTo(0, 0); }
+    return;
+  }
+
+  // 2) Bloqueio: tem resposta pendente de salvar no servidor (clique recente, rede lenta).
+  if (state.salvandoPendente && state.salvandoPendente > 0) {
+    alert("Ainda estamos salvando a última resposta. Espere 2 segundos e clique em Finalizar de novo.");
+    return;
+  }
+
+  // 3) Checagem leve: alguma letra marcada localmente que ainda não foi confirmada como salva?
+  const naoConfirmadas = p.questoes.filter((q) => {
+    const marcada = state.respostas[q.id];
+    const salva = state.respostasSalvas && state.respostasSalvas[q.id];
+    return marcada && salva !== marcada;
+  });
+  if (naoConfirmadas.length > 0) {
+    const nums = naoConfirmadas.map((q) => numeroDe(q)).join(", ");
+    const ok = confirm(
+      `Atenção: ${naoConfirmadas.length} ${naoConfirmadas.length === 1 ? "resposta pode não ter sido salva" : "respostas podem não ter sido salvas"} no servidor (${nums}).\n\n` +
+      `Recomendamos voltar e clicar de novo na alternativa dessas questões.\n\n` +
+      `Deseja finalizar mesmo assim?`
+    );
+    if (!ok) return;
+  }
+
+  // 4) Confirmação final.
+  const ok = confirm("Tem certeza que quer finalizar? Depois de finalizar você não pode mais alterar as respostas.");
+  if (!ok) return;
+
   try {
     const resultado = await api(`/prova/${provaMestreId}/${encodeURIComponent(token)}/finalizar`, { method: "POST" });
     renderResultado(resultado);
@@ -551,6 +702,8 @@ function renderResultado(r) {
         const dadosNovos = await api(`/prova/${provaMestreId}/${encodeURIComponent(token)}/nova-tentativa`, { method: "POST" });
         state.prova = dadosNovos;
         state.respostas = {};
+        state.respostasSalvas = {};
+        state.salvandoPendente = 0;
         state.atual = 0;
         renderInstrucoes();
       } catch (e) {
