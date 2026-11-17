@@ -67,53 +67,62 @@ function formatarInline(texto) {
 function latexParaTexto(s) {
   if (!s) return "";
   let t = String(s);
-  // \lim_{x \to 0} → "lim(x→0)"  (resolve ANTES de substituir \to)
+  // \lim_{x \to 0} → "lim(x -> 0)"  (resolve ANTES de \to)
   t = t.replace(/\\lim\s*_\{([^{}]*)\}/g, (_, sub) => "lim(" + sub.trim() + ")");
   t = t.replace(/\\lim\b/g, "lim");
-  // \displaystyle some
-  t = t.replace(/\\displaystyle\s*/g, "");
-  // \dfrac{A}{B} e \frac{A}{B} → "(A)/(B)" — aplica iterativamente p/ aninhamento
-  for (let i = 0; i < 6; i++) {
+  // \displaystyle / \textstyle / \scriptstyle
+  t = t.replace(/\\(?:displaystyle|textstyle|scriptstyle)\s*/g, "");
+  // \sqrt[n]{A} → "raiz_n(A)";  \sqrt{A} → "sqrt(A)";  \frac/\dfrac/\tfrac/\cfrac {A}{B} → "(A)/(B)"
+  // Precisa alternar: o conteúdo pode ser aninhado (\dfrac{\sqrt{x}-6}{x}).
+  // Começa pelas folhas (grupos sem { dentro) e vai subindo até a raiz.
+  for (let i = 0; i < 20; i++) {
     const antes = t;
-    t = t.replace(/\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
+    t = t.replace(/\\sqrt\s*\[([^\]]*)\]\s*\{([^{}]*)\}/g, "raiz_$1($2)");
+    t = t.replace(/\\sqrt\s*\{([^{}]*)\}/g, "sqrt($1)");
+    t = t.replace(/\\(?:d|t|c)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
     if (t === antes) break;
   }
-  // \sqrt[n]{A} → "ⁿ√(A)";  \sqrt{A} → "√(A)"
-  t = t.replace(/\\sqrt\s*\[([^\]]*)\]\s*\{([^{}]*)\}/g, "$1√($2)");
-  for (let i = 0; i < 6; i++) {
-    const antes = t;
-    t = t.replace(/\\sqrt\s*\{([^{}]*)\}/g, "√($1)");
-    if (t === antes) break;
-  }
-  // Operadores e símbolos comuns
+  // Primeiro: espaços LaTeX "\,"  "\;"  "\:"  "\!"  "\ "  "\quad" "\qquad"
+  // (não têm letra depois do \, então o lookahead do bloco seguinte não serve)
+  t = t.replace(/\\[,;:]/g, " ")
+       .replace(/\\!/g, "")
+       .replace(/\\(?:quad|qquad)\b/g, "  ")
+       .replace(/\\ /g, " ");
+  // Operadores e símbolos — usando ASCII/Latin-1 (jsPDF Helvetica default)
   const mapa = {
-    "\\\\to": "→",   "\\\\rightarrow": "→", "\\\\leftarrow": "←",
-    "\\\\cdot": "·", "\\\\times": "×", "\\\\div": "÷",
-    "\\\\pm": "±",   "\\\\mp": "∓",
-    "\\\\leq": "≤",  "\\\\le": "≤", "\\\\geq": "≥", "\\\\ge": "≥",
-    "\\\\neq": "≠",  "\\\\ne": "≠", "\\\\approx": "≈", "\\\\equiv": "≡",
-    "\\\\infty": "∞", "\\\\partial": "∂", "\\\\nabla": "∇",
-    "\\\\int": "∫",  "\\\\sum": "∑", "\\\\prod": "∏",
-    "\\\\sin": "sen","\\\\cos": "cos", "\\\\tan": "tg",
-    "\\\\log": "log","\\\\ln": "ln", "\\\\exp": "exp",
-    "\\\\ldots": "…","\\\\cdots": "⋯", "\\\\dots": "…",
-    "\\\\left": "",  "\\\\right": "",
-    "\\\\,": " ",    "\\\\ ": " ", "\\\\!": "", "\\\\;": " ", "\\\\:": " ", "\\\\quad": "  ", "\\\\qquad": "    ",
-    // letras gregas comuns
-    "\\\\alpha": "α","\\\\beta": "β", "\\\\gamma": "γ", "\\\\delta": "δ",
-    "\\\\epsilon": "ε", "\\\\varepsilon": "ε",
-    "\\\\theta": "θ", "\\\\lambda": "λ", "\\\\mu": "μ", "\\\\pi": "π",
-    "\\\\rho": "ρ",   "\\\\sigma": "σ", "\\\\tau": "τ", "\\\\phi": "φ",
-    "\\\\omega": "ω",
-    "\\\\Delta": "Δ", "\\\\Pi": "Π", "\\\\Sigma": "Σ", "\\\\Omega": "Ω", "\\\\Theta": "Θ",
+    "\\\\to": "->",         "\\\\rightarrow": "->", "\\\\leftarrow": "<-",
+    "\\\\cdot": "·",   "\\\\times": "×",  "\\\\div": "÷",
+    "\\\\pm": "±",     "\\\\mp": "-/+",
+    "\\\\leq": "<=",        "\\\\le": "<=",         "\\\\geq": ">=", "\\\\ge": ">=",
+    "\\\\neq": "!=",        "\\\\ne": "!=",         "\\\\approx": "~=", "\\\\equiv": "===",
+    "\\\\infty": "inf",     "\\\\partial": "d",     "\\\\nabla": "grad",
+    "\\\\int": "integ",     "\\\\sum": "soma",      "\\\\prod": "prod",
+    "\\\\sin": "sen",       "\\\\cos": "cos",       "\\\\tan": "tg",
+    "\\\\arcsin": "arcsen", "\\\\arccos": "arccos", "\\\\arctan": "arctg",
+    "\\\\log": "log",       "\\\\ln": "ln",         "\\\\exp": "exp",
+    "\\\\ldots": "...",     "\\\\cdots": "...",     "\\\\dots": "...",
+    "\\\\left": "",         "\\\\right": "",        "\\\\big": "", "\\\\Big": "", "\\\\bigg": "", "\\\\Bigg": "",
+    "\\\\text": "",         "\\\\mathrm": "",       "\\\\mathbf": "", "\\\\mathit": "",
+    // letras gregas — por nome (Helvetica não tem os glifos)
+    "\\\\alpha": "alpha",   "\\\\beta": "beta",     "\\\\gamma": "gamma", "\\\\delta": "delta",
+    "\\\\epsilon": "eps",   "\\\\varepsilon": "eps","\\\\zeta": "zeta",   "\\\\eta": "eta",
+    "\\\\theta": "theta",   "\\\\iota": "iota",     "\\\\kappa": "kappa", "\\\\lambda": "lambda",
+    "\\\\mu": "μ",     "\\\\nu": "nu",         "\\\\xi": "xi",       "\\\\omicron": "o",
+    "\\\\pi": "pi",         "\\\\rho": "rho",       "\\\\sigma": "sigma", "\\\\tau": "tau",
+    "\\\\upsilon": "upsilon","\\\\phi": "phi",      "\\\\chi": "chi",     "\\\\psi": "psi",
+    "\\\\omega": "omega",
+    "\\\\Gamma": "Gamma",   "\\\\Delta": "Delta",   "\\\\Theta": "Theta", "\\\\Lambda": "Lambda",
+    "\\\\Xi": "Xi",         "\\\\Pi": "Pi",         "\\\\Sigma": "Sigma", "\\\\Phi": "Phi",
+    "\\\\Psi": "Psi",       "\\\\Omega": "Omega",
   };
   for (const [k, v] of Object.entries(mapa)) t = t.replace(new RegExp(k + "(?![a-zA-Z])", "g"), v);
-  // Subscritos/sobrescritos simples: _{abc} / ^{abc} / _a / ^a
+  // Subscritos/sobrescritos: _{abc} / ^{abc} / _a / ^a  — ^2 pra 'x^2'; _{s,v} pra T_s
   t = t.replace(/\^\{([^{}]*)\}/g, "^($1)").replace(/_\{([^{}]*)\}/g, "_($1)");
   t = t.replace(/\^([0-9a-zA-Z])/g, "^$1").replace(/_([0-9a-zA-Z])/g, "_$1");
   // Remove chaves que sobraram (grupos sem comando)
   t = t.replace(/\{([^{}]*)\}/g, "$1");
-  // Espaço antes e depois de operadores pra ficar legível
+  // Normaliza espaços
+  t = t.replace(/ {2,}/g, " ").replace(/\s+([,.;:)])/g, "$1");
   return t;
 }
 
