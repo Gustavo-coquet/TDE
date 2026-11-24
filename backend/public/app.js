@@ -153,6 +153,16 @@ function molduraBloco(b, ativo, dentro, clicavel, cor, comApagar = false) {
   const c = (cor || PALETA_BLOCO[0]).rgb;
   // miniatura da figura do bloco, pra reconhecer de relance qual viga/peça é
   const fig = b.questoes.map((q) => q.imagem).find(Boolean);
+  // No Banco (comApagar=true), a 1ª questão do bloco dá o "assunto" compartilhado por todas
+  // e é editável inline: clique → digite → Enter (ou clique fora) salva no bloco inteiro.
+  const q0 = b.questoes[0];
+  const assuntoEditavel = (comApagar && q0) ? `
+          <div class="mono" style="font-size:11px; margin-top:4px; color:rgba(${c},.55);">ASSUNTO (todas do bloco)</div>
+          <div style="font-size:13.5px; font-weight:600; margin-top:1px;">
+            <span class="edit-assunto" contenteditable="plaintext-only" spellcheck="false"
+                  data-edit-assunto="${q0.id}" data-original="${attr(q0.assunto)}"
+                  title="Clique pra editar · Enter salva · Esc cancela">${attr(q0.assunto)}</span>
+          </div>` : "";
   return `
     <div ${clicavel ? `data-toggle-bloco="${b.grupo}"` : ""} style="border:1px solid rgba(${c},${ativo ? ".55" : ".35"});
          border-left:4px solid rgba(${c},${ativo ? "1" : ".6"});
@@ -168,6 +178,7 @@ function molduraBloco(b, ativo, dentro, clicavel, cor, comApagar = false) {
           <div class="mono" style="font-size:11px; margin-top:2px; color:rgba(${c},.72);">
             ${b.questoes.length} questões — mesmos valores sorteados, entram e saem juntas
           </div>
+          ${assuntoEditavel}
         </div>
         ${fig ? `<img src="${fig}" alt="figura do bloco" style="flex-shrink:0; max-height:110px; max-width:280px; width:auto; height:auto; background:#fff; border:1px solid rgba(${c},.5);" />` : ""}
         ${comApagar ? `<button class="btn danger" style="font-size:10.5px; padding:3px 8px; flex-shrink:0;" data-apagar-bloco="${attr(b.grupo)}" data-qtd="${b.questoes.length}">Apagar bloco</button>` : ""}
@@ -278,10 +289,16 @@ function formatarValorCampo(valor, campo) {
 }
 
 // Aplica a formatação inline (**negrito**, ^{sup}, _{sub}) e escapa HTML por segurança.
-// Não mexe em quebras de linha — serve tanto pro enunciado quanto pra nomes/unidades das respostas.
+// Protege zonas de LaTeX ($$...$$ e $...$) pra o KaTeX conseguir renderizar depois sem
+// interferência — _{...} e ^{...} do LaTeX NÃO podem virar <sub>/<sup> antes do KaTeX.
 function formatarInline(texto) {
   if (!texto) return "";
-  return String(texto)
+  const zonas = [];
+  const token = (i) => `\u0001MATH${i}\u0001`;
+  let s = String(texto)
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => { zonas.push({ display: true, body: m }); return token(zonas.length - 1); })
+    .replace(/\$([^\$\n]+?)\$/g,     (_, m) => { zonas.push({ display: false, body: m }); return token(zonas.length - 1); });
+  s = s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -289,12 +306,20 @@ function formatarInline(texto) {
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/\^\{(.+?)\}/g, "<sup>$1</sup>")
     .replace(/_\{(.+?)\}/g, "<sub>$1</sub>");
+  const escMath = (m) => m.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s.replace(/\u0001MATH(\d+)\u0001/g, (_, i) => {
+    const z = zonas[+i];
+    return z.display ? `$$${escMath(z.body)}$$` : `$${escMath(z.body)}$`;
+  });
 }
 
 // Remove as marcações sem virar HTML — usado no PDF, que não entende tags.
+// Desembala $$...$$ e $...$ mantendo só o conteúdo LaTeX como texto puro.
 function limparMarcacoes(texto) {
   if (!texto) return "";
   return String(texto)
+    .replace(/\$\$([\s\S]+?)\$\$/g, "$1")
+    .replace(/\$([^\$\n]+?)\$/g, "$1")
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/\^\{(.+?)\}/g, "$1")
     .replace(/_\{(.+?)\}/g, "$1");
@@ -304,6 +329,30 @@ function limparMarcacoes(texto) {
 function formatarEnunciado(texto) {
   if (!texto) return "";
   return formatarInline(texto).replace(/\n/g, "<br>");
+}
+
+// Renderiza equações LaTeX entre $...$ (inline) e $$...$$ (display) via KaTeX.
+// Chame depois de qualquer content.innerHTML = ... que mostre enunciado/alternativas.
+// Se o KaTeX ainda não carregou (CDN lenta na 1ª visita), tenta de novo em 100ms, até 10x.
+function renderMath(el, tentativa = 0) {
+  const alvo = el || document.getElementById("content");
+  if (!alvo) return;
+  if (window.renderMathInElement) {
+    try {
+      window.renderMathInElement(alvo, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$",  right: "$",  display: false },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "\\[", right: "\\]", display: true },
+        ],
+        throwOnError: false,
+        strict: "ignore",
+      });
+    } catch (e) { console.warn("KaTeX falhou:", e); }
+  } else if (tentativa < 10) {
+    setTimeout(() => renderMath(alvo, tentativa + 1), 100);
+  }
 }
 
 async function api(path, options) {
@@ -452,8 +501,8 @@ async function renderTurmas() {
         const pos = { tdeG1: -1, avG1: -1, g1: -1, tdeG2: -1, avG2: -1, g2: -1 };
         const empurra = (titulo) => { cabecalho.push(titulo); return cabecalho.length - 1; };
         // Colunas por grupo: TDEs → Nota TDE (soma arredondada) → Nota AVn → Gn.
-        // A coluna "Nota TDE" e so pra o professor ver o quanto o aluno juntou nos TDEs;
-        // o G final NAO soma a propria "Nota TDE" (senao dobrava), usa TDEs+AV direto.
+        // A coluna "Nota TDE" e so pra o professor ver quanto o aluno juntou nos TDEs; o G
+        // final NAO conta a propria "Nota TDE" (senao dobrava), usa TDEs+AV direto.
         for (const i of idxG1) idxColTde[i] = empurra(colTde(i));
         if (idxG1.length) { pos.tdeG1 = empurra("Nota TDE\n(soma)"); pos.avG1 = empurra("Nota AV1"); pos.g1 = empurra("G1"); }
         for (const i of idxG2) idxColTde[i] = empurra(colTde(i));
@@ -484,7 +533,10 @@ async function renderTurmas() {
             else empurraNum(idxColTde[i], num(a.notas[i]));
           }
           if (idxG1.length) {
+            // Dois modos de AV1: nota manual (notaAV1Manual) tem prioridade; senao, converte
+            // acertos (0..10) em pontos proporcionais ao que sobra depois dos TDEs.
             if (a.faltouAV1) empurraTxt(pos.avG1, "Faltou");
+            else if (a.notaAV1Manual != null) empurraNum(pos.avG1, num(a.notaAV1Manual));
             else if (a.acertosAV1 != null) {
               const pontosAV1 = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
               empurraNum(pos.avG1, Math.round(Number(a.acertosAV1) * pontosAV1 / 10 * 100) / 100);
@@ -494,7 +546,10 @@ async function renderTurmas() {
             if (a.notas[i] == null) empurraTxt(idxColTde[i], "Não Fez");
             else empurraNum(idxColTde[i], num(a.notas[i]));
           }
-          if (idxG2.length && a.notaAV2 != null) empurraNum(pos.avG2, a.notaAV2);
+          if (idxG2.length) {
+            if (a.faltouAV2) empurraTxt(pos.avG2, "Faltou");
+            else if (a.notaAV2 != null) empurraNum(pos.avG2, a.notaAV2);
+          }
           for (const i of idxSG) {
             if (a.notas[i] == null) empurraTxt(idxColTde[i], "Não Fez");
             else empurraNum(idxColTde[i], num(a.notas[i]));
@@ -516,8 +571,8 @@ async function renderTurmas() {
         }
 
         // Formulas por aluno:
-        //   Nota TDE = ROUND(SUM(TDEs do grupo), 1)   — so a soma dos TDEs, arredondada.
-        //   G       = ROUNDUP(SUM(TDEs do grupo) + AV, 1)  — nota final, pulando a propria
+        //   Nota TDE = ROUND(SUM(TDEs do grupo), 1)  — so a soma dos TDEs, arredondada.
+        //   G       = ROUNDUP(SUM(TDEs do grupo) + AV, 1) — nota final, pulando a propria
         //             "Nota TDE" pra nao somar duas vezes. SUM ignora texto ("Nao Fez"/"Faltou").
         const colL = (c) => XLSX.utils.encode_col(c);
         const primeiraCol = (idxs) => idxs.length ? idxColTde[idxs[0]] : -1;
@@ -538,13 +593,16 @@ async function renderTurmas() {
           if (!idxG1.length) return null;
           const totalTdes = idxG1.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
           const pontosAV = Math.max(0, 10 - idxG1.reduce((acc, i) => acc + Number(dados.tdes[i].valor || 0), 0));
-          const av = a.faltouAV1 ? 0 : (a.acertosAV1 != null ? Math.round(Number(a.acertosAV1) * pontosAV / 10 * 100) / 100 : 0);
+          const av = a.faltouAV1 ? 0
+                    : a.notaAV1Manual != null ? Number(a.notaAV1Manual)
+                    : a.acertosAV1 != null ? Math.round(Number(a.acertosAV1) * pontosAV / 10 * 100) / 100
+                    : 0;
           return totalTdes + av;
         };
         const gFinalG2 = (a) => {
           if (!idxG2.length) return null;
           const totalTdes = idxG2.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
-          const av = a.notaAV2 != null ? Number(a.notaAV2) : 0;
+          const av = a.faltouAV2 ? 0 : (a.notaAV2 != null ? Number(a.notaAV2) : 0);
           return totalTdes + av;
         };
 
@@ -650,8 +708,7 @@ async function renderTurmas() {
           const fmtBR = (v) => typeof v === "number" ? String(+Number(v).toFixed(2)).replace(".", ",") : v;
           // G1/G2 no PDF saem arredondados PRA CIMA com 1 casa (igual ROUNDUP(soma,1))
           const ceilG = (v) => Math.ceil(v * 10) / 10;
-          // "Nota TDE" (soma) sai arredondada normal (banker-style round com 1 casa) pra bater
-          // com a formula ROUND do Excel.
+          // "Nota TDE" (soma) sai arredondada normal com 1 casa (bate com ROUND do Excel).
           const roundG = (v) => Math.round(v * 10) / 10;
           const somaTdesDe = (a, idxs) => idxs.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
           const g1Val   = dados.alunos.map((a) => { const v = gFinalG1(a); return v == null ? null : ceilG(v); });
@@ -775,20 +832,43 @@ async function renderTurmaDetalhe() {
         <button class="btn subtle" id="btn-add-alunos">+ Adicionar</button>
         <div class="divider">
           ${alunos.length === 0 ? `<div class="muted" style="font-size:13px;">Nenhum aluno matriculado ainda.</div>` : ""}
-          ${alunos.map((a, i) => `
+          ${alunos.map((a, i) => {
+            // Modo da AV1 por aluno — padrao "acertos" (como era), mas se o professor ja digitou
+            // uma nota manual (notaAV1Manual), abre direto no modo "nota direta". Faltou vale
+            // nos dois modos.
+            const modoManual = a.notaAV1Manual != null;
+            const modo = modoManual ? "manual" : "acertos";
+            const inputAcertos = `
+              <input data-nota-av="acertosAV1" data-aluno="${a.id}" type="text" inputmode="decimal"
+                     value="${a.faltouAV1 ? "Faltou" : (a.acertosAV1 ?? "")}" placeholder="—"
+                     style="width:62px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center; ${modo==="acertos"?"":"display:none;"}"
+                     title="Quantas das 10 questões o aluno acertou (0 a 10, aceita meios). Digite &quot;Faltou&quot; se ele não compareceu." />
+              <span data-sufixo-av1="${a.id}" style="color:var(--ink-faint); font-size:10px; ${modo==="acertos"?"":"display:none;"}">/10</span>`;
+            const inputManual = `
+              <input data-nota-av="notaAV1Manual" data-aluno="${a.id}" type="text" inputmode="decimal"
+                     value="${a.faltouAV1 ? "Faltou" : (a.notaAV1Manual ?? "")}" placeholder="—"
+                     style="width:62px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center; ${modo==="manual"?"":"display:none;"}"
+                     title="Nota da AV1 digitada direto (0 a 10). Use este modo se quiser lançar a nota final sem calcular por acertos. Digite &quot;Faltou&quot; se ele não compareceu." />`;
+            return `
             <div class="row" style="padding:8px 0; ${i>0?'border-top:1px solid var(--line-faint);':''}; align-items:center; flex-wrap:wrap; gap:8px;">
               <span style="font-size:13px; flex:1 1 220px;">${a.nome} <span class="mono muted" style="font-size:11px;">— matrícula ${a.matricula}</span></span>
               <div style="display:flex; align-items:center; gap:6px; font-size:11px;">
-                <label style="color:var(--ink-faint);" title="Quantas das 10 questões da AV1 o aluno acertou. A nota sai de acertos × (10 - soma dos TDEs da G1) / 10.">Acertos AV1</label>
-                <input data-nota-av="acertosAV1" data-aluno="${a.id}" type="text" inputmode="decimal" value="${a.faltouAV1 ? "Faltou" : (a.acertosAV1 ?? "")}" placeholder="—" style="width:62px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Quantas das 10 questões o aluno acertou (0 a 10, aceita meios). Digite &quot;Faltou&quot; se ele não compareceu." />
-                <span style="color:var(--ink-faint); font-size:10px;">/10</span>
-                <label style="color:var(--ink-faint); margin-left:10px;" title="Nota direta da AV2 (0 a 10). Discursiva, pesos variáveis — você digita a nota final já calculada.">Nota AV2</label>
-                <input data-nota-av="notaAV2" data-aluno="${a.id}" type="number" step="0.1" min="0" max="10" value="${a.notaAV2 ?? ""}" placeholder="—" style="width:60px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G2 (0 a 10)" />
+                <label data-rotulo-av1="${a.id}" style="color:var(--ink-faint);" title="Clique no botão ao lado pra alternar entre contar acertos (10 questões) ou digitar a nota direto.">${modo==="acertos"?"Acertos AV1":"Nota AV1"}</label>
+                ${inputAcertos}
+                ${inputManual}
+                <button type="button" class="btn subtle" data-alternar-av1="${a.id}" data-modo="${modo}"
+                        style="padding:2px 7px; font-size:10px; line-height:1.3;"
+                        title="Alternar entre contar acertos (0..10) e digitar a nota direta (0..10). Troca sem perder &quot;Faltou&quot;.">
+                  ${modo==="acertos"?"usar nota direta":"usar acertos"}
+                </button>
+                <label style="color:var(--ink-faint); margin-left:10px;" title="Nota direta da AV2 (0 a 10). Discursiva, pesos variáveis — você digita a nota final já calculada. Pode escrever Faltou se o aluno não compareceu.">Nota AV2</label>
+                <input data-nota-av="notaAV2" data-aluno="${a.id}" type="text" inputmode="decimal" value="${a.faltouAV2 ? "Faltou" : (a.notaAV2 ?? "")}" placeholder="—" style="width:70px; background:var(--surface-raised); border:1px solid var(--line); color:var(--ink); padding:3px 6px; font-size:12px; text-align:center;" title="Nota da avaliação presencial da G2 (0 a 10). Digite &quot;Faltou&quot; se ele não compareceu." />
                 <span id="erro-av-${a.id}" class="mono" style="color:var(--red); font-size:10px;"></span>
               </div>
               <button class="btn danger" style="padding:4px 8px; font-size:11px;" data-remover-aluno="${a.id}">Remover</button>
             </div>
-          `).join("")}
+          `;
+          }).join("")}
         </div>
       </div>
 
@@ -947,12 +1027,13 @@ async function renderTurmaDetalhe() {
       try {
         const bruto = el.value.trim();
         let valor;
+        const aceitaFaltou = (campo === "acertosAV1" || campo === "notaAV1Manual" || campo === "notaAV2");
         if (bruto === "") valor = null;
-        else if (campo === "acertosAV1" && /^faltou$/i.test(bruto)) {
+        else if (aceitaFaltou && /^faltou$/i.test(bruto)) {
           valor = "Faltou"; el.value = "Faltou";
         } else {
           valor = Number(bruto.replace(",", "."));
-          if (!isFinite(valor)) throw new Error("Digite um número de 0 a 10, ou 'Faltou' (apenas no AV1).");
+          if (!isFinite(valor)) throw new Error("Digite um número de 0 a 10, ou 'Faltou'.");
         }
         await api(`/alunos/${alunoId}/nota-av`, { method: "PUT", body: JSON.stringify({ campo, valor }) });
         el.dataset.prev = el.value;
@@ -960,6 +1041,34 @@ async function renderTurmaDetalhe() {
         erroEl.textContent = e.message;
         el.value = el.dataset.prev;
       }
+    });
+  });
+
+  // Alterna o modo de lançamento da AV1 por aluno: "acertos" (default, vira nota) <-> "manual"
+  // (nota digitada direto). So mostra/esconde os inputs — a nota so eh salva quando o professor
+  // digita e sai do campo. Trocar de modo nao apaga nada por si so; o backend limpa o campo
+  // concorrente quando o novo valor eh salvo.
+  content.querySelectorAll("[data-alternar-av1]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const alunoId = btn.dataset.alternarAv1;
+      const modoAtual = btn.dataset.modo;
+      const novoModo = modoAtual === "acertos" ? "manual" : "acertos";
+      const inputAc = content.querySelector(`[data-nota-av="acertosAV1"][data-aluno="${alunoId}"]`);
+      const inputMn = content.querySelector(`[data-nota-av="notaAV1Manual"][data-aluno="${alunoId}"]`);
+      const sufixo  = content.querySelector(`[data-sufixo-av1="${alunoId}"]`);
+      const rotulo  = content.querySelector(`[data-rotulo-av1="${alunoId}"]`);
+      if (novoModo === "acertos") {
+        inputAc.style.display = ""; sufixo.style.display = ""; inputMn.style.display = "none";
+        if (rotulo) rotulo.textContent = "Acertos AV1";
+        btn.textContent = "usar nota direta";
+        inputAc.focus();
+      } else {
+        inputMn.style.display = ""; inputAc.style.display = "none"; sufixo.style.display = "none";
+        if (rotulo) rotulo.textContent = "Nota AV1";
+        btn.textContent = "usar acertos";
+        inputMn.focus();
+      }
+      btn.dataset.modo = novoModo;
     });
   });
 
@@ -1217,8 +1326,8 @@ async function renderBanco(mostrarForm) {
     </div>
     ${mostrarForm ? `<div id="form-questao" style="margin-bottom:18px;"></div>` : ""}
     ${renderBarraFiltro("banco", questoes, state.filtroBanco)}
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start;">
-      <div>
+    <div class="grid-banco-2col">
+      <div style="min-width:0;">
         <div class="mono muted" style="font-size:11px; margin-bottom:8px;">${filtradas.length} de ${questoes.length} questões</div>
         ${(() => {
           const lista = blocosDe(filtradas, questoes);
@@ -1230,7 +1339,13 @@ async function renderBanco(mostrarForm) {
             <div class="row">
               <div>
                 ${dentro ? "" : `<span class="pill" style="margin-bottom:6px;">${q.disciplina}</span>`}
-                <div style="font-weight:600; font-size:13.5px; margin-top:${dentro ? "0" : "6px"};">${dentro ? rotuloRespostas(q) : q.assunto}</div>
+                <div style="font-weight:600; font-size:13.5px; margin-top:${dentro ? "0" : "6px"};">
+                  ${dentro
+                    ? rotuloRespostas(q)
+                    : `<span class="edit-assunto" contenteditable="plaintext-only" spellcheck="false"
+                             data-edit-assunto="${q.id}" data-original="${attr(q.assunto)}"
+                             title="Clique pra editar · Enter salva · Esc cancela">${attr(q.assunto)}</span>`}
+                </div>
               </div>
               <div class="dots">${[1,2,3,4,5].map((i) => `<div class="dot ${i<=q.dificuldade?'on':''}"></div>`).join("")}</div>
             </div>
@@ -1277,6 +1392,45 @@ async function renderBanco(mostrarForm) {
         alert("Erro ao apagar o bloco: " + e.message);
         el.disabled = false;
         el.textContent = "Apagar bloco";
+      }
+    });
+  });
+
+  // Edição inline do "assunto" direto no card/moldura — sem precisar abrir o editor completo.
+  // Clica no texto, digita, Enter (ou clique fora) salva; Esc cancela. Se a questão faz parte
+  // de um bloco encadeado, o PATCH do backend propaga a mudança pras irmãs automaticamente.
+  content.querySelectorAll("[data-edit-assunto]").forEach((el) => {
+    // Clicar no span NÃO deve abrir o preview da questão (o card inteiro é clicável).
+    el.addEventListener("click", (ev) => ev.stopPropagation());
+    el.addEventListener("mousedown", (ev) => ev.stopPropagation());
+
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); el.blur(); }
+      if (ev.key === "Escape") { el.textContent = el.dataset.original || ""; el.blur(); }
+    });
+
+    el.addEventListener("blur", async () => {
+      const novo = el.textContent.trim();
+      const antigo = (el.dataset.original || "").trim();
+      if (!novo) { el.textContent = antigo; return; } // vazio → desfaz
+      if (novo === antigo) return;                    // sem mudança → nada a fazer
+      const qid = el.dataset.editAssunto;
+      el.style.opacity = "0.5";
+      try {
+        const r = await api(`/questoes/${qid}`, { method: "PATCH", body: JSON.stringify({ assunto: novo }) });
+        el.dataset.original = novo;
+        // Atualiza o cache local pra outros cards do mesmo bloco refletirem na hora, sem rerender.
+        state.questoes.forEach((q) => {
+          if (q.id === qid || (r.grupoVariaveis && q.grupoVariaveis === r.grupoVariaveis)) q.assunto = novo;
+        });
+        // Marca visualmente "salvo" por 0,8s.
+        el.style.outline = "1px solid var(--teal)";
+        setTimeout(() => { el.style.outline = ""; }, 800);
+      } catch (e) {
+        alert("Não consegui salvar o assunto: " + e.message);
+        el.textContent = antigo;
+      } finally {
+        el.style.opacity = "";
       }
     });
   });
@@ -2282,5 +2436,25 @@ async function renderResultados() {
     XLSX.writeFile(wb, nomeArquivo);
   });
 }
+
+// Observa o #content e roda o KaTeX sempre que o HTML muda — assim não precisa chamar
+// renderMath() manualmente em cada um dos ~15 pontos do app que alteram content.innerHTML.
+// Desconecta o observer enquanto o KaTeX modifica o DOM, pra não entrar em loop infinito.
+(function ligarKaTeXAutomatico() {
+  const alvo = document.getElementById("content");
+  if (!alvo) return;
+  let pendente = false;
+  const config = { childList: true, subtree: true, characterData: true };
+  const observer = new MutationObserver(() => {
+    if (pendente) return;
+    pendente = true;
+    requestAnimationFrame(() => {
+      pendente = false;
+      observer.disconnect();
+      try { renderMath(alvo); } finally { observer.observe(alvo, config); }
+    });
+  });
+  observer.observe(alvo, config);
+})();
 
 render();

@@ -75,6 +75,7 @@ turmasRouter.get("/:id/exportar-resultados", asyncHandler(async (req, res) => {
       notaAV1Manual: (a as any).notaAV1Manual ?? null,
       faltouAV1: (a as any).faltouAV1 ?? false,
       notaAV2: (a as any).notaAV2 ?? null,
+      faltouAV2: (a as any).faltouAV2 ?? false,
     })),
   });
 }));

@@ -73,6 +73,7 @@ async function atualizarEsquema() {
     await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ALTER COLUMN "acertosAV1" TYPE DOUBLE PRECISION USING "acertosAV1"::double precision');
     await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ADD COLUMN IF NOT EXISTS "notaAV2" DOUBLE PRECISION');
     await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ADD COLUMN IF NOT EXISTS "notaAV1Manual" DOUBLE PRECISION');
+    await prisma.$executeRawUnsafe('ALTER TABLE "Aluno" ADD COLUMN IF NOT EXISTS "faltouAV2" BOOLEAN');
   } catch (e) {
     console.error("Falha ao atualizar o esquema (talvez a tabela ainda nao exista):", e);
   }

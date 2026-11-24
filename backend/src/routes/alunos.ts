@@ -56,12 +56,22 @@ alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
     return res.status(400).json({ erro: "campo precisa ser \"acertosAV1\", \"notaAV1Manual\" ou \"notaAV2\"." });
   }
   const ehAV1 = campo === "acertosAV1" || campo === "notaAV1Manual";
-  // trata o sentinela "Faltou": vale em qualquer campo de AV1 (por acertos ou nota direta).
-  // Zera acertos, zera a nota manual e marca faltouAV1=true, pra o export sair "Faltou".
-  if (ehAV1 && typeof valor === "string" && /^faltou$/i.test(String(valor).trim())) {
+  const ehAV2 = campo === "notaAV2";
+  const ehFaltou = typeof valor === "string" && /^faltou$/i.test(String(valor).trim());
+  // trata o sentinela "Faltou": vale pra AV1 (acertos/nota direta) e tambem pra AV2.
+  // Zera a nota e marca faltouAVn=true, pra o export sair "Faltou".
+  if (ehAV1 && ehFaltou) {
     try {
       const aluno = await prisma.aluno.update({ where: { id }, data: { acertosAV1: null, notaAV1Manual: null, faltouAV1: true } as any });
-      return res.json({ id: aluno.id, acertosAV1: null, notaAV1Manual: null, faltouAV1: true, notaAV2: (aluno as any).notaAV2 });
+      return res.json({ id: aluno.id, acertosAV1: null, notaAV1Manual: null, faltouAV1: true, notaAV2: (aluno as any).notaAV2, faltouAV2: (aluno as any).faltouAV2 });
+    } catch (e: any) {
+      return res.status(404).json({ erro: "Aluno nao encontrado." });
+    }
+  }
+  if (ehAV2 && ehFaltou) {
+    try {
+      const aluno = await prisma.aluno.update({ where: { id }, data: { notaAV2: null, faltouAV2: true } as any });
+      return res.json({ id: aluno.id, acertosAV1: (aluno as any).acertosAV1, notaAV1Manual: (aluno as any).notaAV1Manual, faltouAV1: (aluno as any).faltouAV1, notaAV2: null, faltouAV2: true });
     } catch (e: any) {
       return res.status(404).json({ erro: "Aluno nao encontrado." });
     }
@@ -87,10 +97,11 @@ alunosRouter.put("/:id/nota-av", asyncHandler(async (req, res) => {
   let dados: any;
   if (campo === "acertosAV1")      dados = { acertosAV1: num,  notaAV1Manual: null, faltouAV1: false };
   else if (campo === "notaAV1Manual") dados = { notaAV1Manual: num, acertosAV1: null,   faltouAV1: false };
+  else if (campo === "notaAV2")    dados = { notaAV2: num, faltouAV2: false };
   else                              dados = { [campo]: num };
   try {
     const aluno = await prisma.aluno.update({ where: { id }, data: dados });
-    res.json({ id: aluno.id, acertosAV1: (aluno as any).acertosAV1, notaAV1Manual: (aluno as any).notaAV1Manual, faltouAV1: (aluno as any).faltouAV1, notaAV2: (aluno as any).notaAV2 });
+    res.json({ id: aluno.id, acertosAV1: (aluno as any).acertosAV1, notaAV1Manual: (aluno as any).notaAV1Manual, faltouAV1: (aluno as any).faltouAV1, notaAV2: (aluno as any).notaAV2, faltouAV2: (aluno as any).faltouAV2 });
   } catch (e: any) {
     res.status(404).json({ erro: "Aluno nao encontrado." });
   }
