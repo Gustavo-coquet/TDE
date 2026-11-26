@@ -579,12 +579,20 @@ async function renderTurmas() {
         const ultimaCol = (idxs) => idxs.length ? idxColTde[idxs[idxs.length - 1]] : -1;
         const firstG1 = primeiraCol(idxG1), lastG1 = ultimaCol(idxG1);
         const firstG2 = primeiraCol(idxG2), lastG2 = ultimaCol(idxG2);
+        // IMPORTANTE: ROUNDUP sozinho sofre com lixo de ponto flutuante — valores como
+        // 2,4 e 4,7 nao sao exatos em binario e sua soma pode dar 9,6000000001, que o
+        // ROUNDUP sobe pra 9,7 (bug reportado em 26/11). Antes do ROUNDUP a gente faz
+        // ROUND(..., 4) pra apagar esse ruido sem alterar o valor real.
         for (let r = 1; r < matriz.length; r++) {
           const linhaExcel = r + 1;
-          if (pos.tdeG1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.tdeG1 })] = { t: "n", f: `ROUND(SUM(${colL(firstG1)}${linhaExcel}:${colL(lastG1)}${linhaExcel}),1)` };
-          if (pos.g1 >= 0)    ws[XLSX.utils.encode_cell({ r, c: pos.g1 })]    = { t: "n", f: `ROUNDUP(SUM(${colL(firstG1)}${linhaExcel}:${colL(lastG1)}${linhaExcel},${colL(pos.avG1)}${linhaExcel}),1)` };
-          if (pos.tdeG2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.tdeG2 })] = { t: "n", f: `ROUND(SUM(${colL(firstG2)}${linhaExcel}:${colL(lastG2)}${linhaExcel}),1)` };
-          if (pos.g2 >= 0)    ws[XLSX.utils.encode_cell({ r, c: pos.g2 })]    = { t: "n", f: `ROUNDUP(SUM(${colL(firstG2)}${linhaExcel}:${colL(lastG2)}${linhaExcel},${colL(pos.avG2)}${linhaExcel}),1)` };
+          const rangeG1 = `${colL(firstG1)}${linhaExcel}:${colL(lastG1)}${linhaExcel}`;
+          const rangeG2 = `${colL(firstG2)}${linhaExcel}:${colL(lastG2)}${linhaExcel}`;
+          const avG1 = `${colL(pos.avG1)}${linhaExcel}`;
+          const avG2 = `${colL(pos.avG2)}${linhaExcel}`;
+          if (pos.tdeG1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.tdeG1 })] = { t: "n", f: `ROUND(SUM(${rangeG1}),1)` };
+          if (pos.g1 >= 0)    ws[XLSX.utils.encode_cell({ r, c: pos.g1 })]    = { t: "n", f: `ROUNDUP(ROUND(SUM(${rangeG1},${avG1}),4),1)` };
+          if (pos.tdeG2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.tdeG2 })] = { t: "n", f: `ROUND(SUM(${rangeG2}),1)` };
+          if (pos.g2 >= 0)    ws[XLSX.utils.encode_cell({ r, c: pos.g2 })]    = { t: "n", f: `ROUNDUP(ROUND(SUM(${rangeG2},${avG2}),4),1)` };
         }
 
         // Nota final G1/G2 calculada no cliente so pra decidir a cor de fundo. "Nao Fez" e
@@ -706,8 +714,13 @@ async function renderTurmas() {
           // monta linhas pra o autoTable, convertendo numeros pro padrao BR (0,83) e deixando
           // texto ("Nao Fez" / "Faltou") passar direto. Guarda o valor cru pra decidir cor.
           const fmtBR = (v) => typeof v === "number" ? String(+Number(v).toFixed(2)).replace(".", ",") : v;
-          // G1/G2 no PDF saem arredondados PRA CIMA com 1 casa (igual ROUNDUP(soma,1))
-          const ceilG = (v) => Math.ceil(v * 10) / 10;
+          // G1/G2 no PDF saem arredondados PRA CIMA com 1 casa (igual ROUNDUP(soma,1)).
+          // Antes de Math.ceil a gente limpa o ruido de ponto flutuante arredondando pra
+          // 4 casas (senao 2,5 + 2,4 + 4,7 = 9,6000000001 subiria pra 9,7).
+          const ceilG = (v) => {
+            const vClean = Math.round(v * 10000) / 10000;
+            return Math.ceil(vClean * 10) / 10;
+          };
           // "Nota TDE" (soma) sai arredondada normal com 1 casa (bate com ROUND do Excel).
           const roundG = (v) => Math.round(v * 10) / 10;
           const somaTdesDe = (a, idxs) => idxs.reduce((s, i) => s + (a.notas[i] == null ? 0 : Number(a.notas[i])), 0);
