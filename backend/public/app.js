@@ -407,14 +407,22 @@ async function renderTurmas() {
             <span>${t.totalAlunos} alunos</span>
             <span>${t.totalTdes} TDEs</span>
           </div>
-          <div style="display:flex; gap:4px;">
-            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="xlsx"
-                    style="font-size:11px; padding:4px 10px; flex:1; justify-content:center;">
-              Excel
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="xlsx" data-grupo="G1"
+                    style="font-size:11px; padding:4px 10px; justify-content:center;" title="Baixar Excel somente da G1 desta turma">
+              Excel G1
             </button>
-            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="pdf"
-                    style="font-size:11px; padding:4px 10px; flex:1; justify-content:center;">
-              PDF
+            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="pdf" data-grupo="G1"
+                    style="font-size:11px; padding:4px 10px; justify-content:center;" title="Baixar PDF somente da G1 desta turma">
+              PDF G1
+            </button>
+            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="xlsx" data-grupo="G2"
+                    style="font-size:11px; padding:4px 10px; justify-content:center;" title="Baixar Excel somente da G2 desta turma">
+              Excel G2
+            </button>
+            <button class="btn subtle" data-exportar-turma="${t.id}" data-nome="${attr(t.nome)}" data-tipo="pdf" data-grupo="G2"
+                    style="font-size:11px; padding:4px 10px; justify-content:center;" title="Baixar PDF somente da G2 desta turma">
+              PDF G2
             </button>
           </div>
         </div>
@@ -479,12 +487,19 @@ async function renderTurmas() {
         const idxSGFull = dados.tdes.map((t, i) => !t.grupoAvaliacao ? i : -1).filter((i) => i >= 0);
         const colTde = (i) => `${dados.tdes[i].titulo} (vale ${formatarBR(dados.tdes[i].valor)})`;
 
-        // lista de arquivos a gerar: um por grupo que tem TDE.
+        // Lista de arquivos a gerar. O botao agora manda qual grupo quer (data-grupo):
+        //   "G1" → so G1; "G2" → so G2; "SG"/"outros" → so os sem grupo;
+        //   nao definido (compat) → cada grupo presente, um arquivo cada.
+        const filtroGrupo = btn.dataset.grupo || "";
         const grupos = [];
-        if (idxG1Full.length) grupos.push({ chave: "G1", sufixo: " - G1" });
-        if (idxG2Full.length) grupos.push({ chave: "G2", sufixo: " - G2" });
-        if (idxSGFull.length) grupos.push({ chave: "SG", sufixo: " - Outros" });
-        if (!grupos.length) throw new Error("Nenhum TDE para exportar.");
+        if ((filtroGrupo === "" || filtroGrupo === "G1") && idxG1Full.length) grupos.push({ chave: "G1", sufixo: " - G1" });
+        if ((filtroGrupo === "" || filtroGrupo === "G2") && idxG2Full.length) grupos.push({ chave: "G2", sufixo: " - G2" });
+        if ((filtroGrupo === "" || filtroGrupo === "SG") && idxSGFull.length) grupos.push({ chave: "SG", sufixo: " - Outros" });
+        if (!grupos.length) {
+          if (filtroGrupo === "G1") throw new Error("Esta turma não tem nenhum TDE marcado como G1.");
+          if (filtroGrupo === "G2") throw new Error("Esta turma não tem nenhum TDE marcado como G2.");
+          throw new Error("Nenhum TDE para exportar.");
+        }
 
         for (const grupo of grupos) {
         // dentro do loop: so os TDEs deste grupo entram. As variaveis idxG1/idxG2/idxSG passam
@@ -585,14 +600,20 @@ async function renderTurmas() {
         // ROUND(..., 4) pra apagar esse ruido sem alterar o valor real.
         for (let r = 1; r < matriz.length; r++) {
           const linhaExcel = r + 1;
-          const rangeG1 = `${colL(firstG1)}${linhaExcel}:${colL(lastG1)}${linhaExcel}`;
-          const rangeG2 = `${colL(firstG2)}${linhaExcel}:${colL(lastG2)}${linhaExcel}`;
-          const avG1 = `${colL(pos.avG1)}${linhaExcel}`;
-          const avG2 = `${colL(pos.avG2)}${linhaExcel}`;
-          if (pos.tdeG1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.tdeG1 })] = { t: "n", f: `ROUND(SUM(${rangeG1}),1)` };
-          if (pos.g1 >= 0)    ws[XLSX.utils.encode_cell({ r, c: pos.g1 })]    = { t: "n", f: `ROUNDUP(ROUND(SUM(${rangeG1},${avG1}),4),1)` };
-          if (pos.tdeG2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.tdeG2 })] = { t: "n", f: `ROUND(SUM(${rangeG2}),1)` };
-          if (pos.g2 >= 0)    ws[XLSX.utils.encode_cell({ r, c: pos.g2 })]    = { t: "n", f: `ROUNDUP(ROUND(SUM(${rangeG2},${avG2}),4),1)` };
+          // IMPORTANTE: so monta a string da faixa quando o grupo existe neste loop.
+          // Fora dele firstG1/lastG1 (ou G2) vem -1, e colL(-1) estoura "invalid column -1".
+          if (idxG1.length) {
+            const rangeG1 = `${colL(firstG1)}${linhaExcel}:${colL(lastG1)}${linhaExcel}`;
+            const avG1Ref = `${colL(pos.avG1)}${linhaExcel}`;
+            if (pos.tdeG1 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.tdeG1 })] = { t: "n", f: `ROUND(SUM(${rangeG1}),1)` };
+            if (pos.g1 >= 0)    ws[XLSX.utils.encode_cell({ r, c: pos.g1 })]    = { t: "n", f: `ROUNDUP(ROUND(SUM(${rangeG1},${avG1Ref}),4),1)` };
+          }
+          if (idxG2.length) {
+            const rangeG2 = `${colL(firstG2)}${linhaExcel}:${colL(lastG2)}${linhaExcel}`;
+            const avG2Ref = `${colL(pos.avG2)}${linhaExcel}`;
+            if (pos.tdeG2 >= 0) ws[XLSX.utils.encode_cell({ r, c: pos.tdeG2 })] = { t: "n", f: `ROUND(SUM(${rangeG2}),1)` };
+            if (pos.g2 >= 0)    ws[XLSX.utils.encode_cell({ r, c: pos.g2 })]    = { t: "n", f: `ROUNDUP(ROUND(SUM(${rangeG2},${avG2Ref}),4),1)` };
+          }
         }
 
         // Nota final G1/G2 calculada no cliente so pra decidir a cor de fundo. "Nao Fez" e
